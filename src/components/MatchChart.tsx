@@ -73,39 +73,38 @@ export default function MatchChart({ data }: Props) {
     ]
   };
 
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: false
-      },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-        titleColor: 'white',
-        bodyColor: 'white',
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        borderWidth: 1,
-        cornerRadius: 12,
-        padding: 12,
-        displayColors: true,
-        callbacks: {
-          label: function(context: any) {
-            const label = context.label;
-            const value = context.parsed;
-            const percentage = stats.total > 0 ? Math.round((value / stats.total) * 100) : 0;
-            return `${label}: ${value} (${percentage}%)`;
-          }
+ const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      display: true,
+      position: 'bottom' as const
+    },
+    tooltip: {
+      backgroundColor: '#fff',
+      titleColor: '#000',
+      bodyColor: '#000',
+      borderColor: '#e5e7eb',
+      borderWidth: 1,
+      cornerRadius: 4,
+      padding: 10,
+      displayColors: false,
+      callbacks: {
+        label: function (context: any) {
+          return `${context.label}: ${context.raw}`;
         }
       }
-    },
-    animation: {
-      animateRotate: true,
-      animateScale: true,
-      duration: 1000,
-      easing: 'easeInOutQuart'
     }
-  };
+  },
+  animation: {
+    animateRotate: true,
+    animateScale: true,
+    duration: 800,
+    easing: 'easeOutQuart' as const // ✅ valid easing string
+  }
+};
+
 
   const getStatusIcon = (status: MatchStatus) => {
     switch (status) {
