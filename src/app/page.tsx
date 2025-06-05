@@ -116,7 +116,7 @@ export default function Home() {
         parseExcel(toValidateFile)
       ]);
 
-      setStatus('Processing data with AI matching algorithms...');
+      setStatus('Processing data with our matching algorithms...');
 
       const res = await fetch('/api/validate', {
         method: 'POST',
