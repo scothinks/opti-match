@@ -145,14 +145,14 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
                 <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
 
-              {/* --- THIS IS THE CORRECTED SECTION --- */}
-              {/* File Info */}
-              <div className="flex-1 min-w-0">
-                {/* We simplified the structure here by removing a nested flexbox */}
-                <p className="font-semibold text-slate-700 truncate">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500 inline-block mr-2 align-middle" />
-                  <span className="align-middle">{file.name}</span>
-                </p>
+              {/* File Info - FIXED VERSION */}
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="flex items-center min-w-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mr-2" />
+                  <p className="font-semibold text-slate-700 truncate min-w-0">
+                    {file.name}
+                  </p>
+                </div>
                 <p className="text-sm text-slate-500">{formatFileSize(file.size)}</p>
               </div>
 
