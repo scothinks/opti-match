@@ -159,7 +159,8 @@ export default function MatchChart({ data }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
         {/* Chart */}
         <div className="relative">
-          <div className="w-80 h-80 mx-auto relative">
+          {/* ** MODIFIED FOR RESPONSIVENESS ** */}
+          <div className="w-full max-w-xs h-auto mx-auto relative">
             <Doughnut data={chartData} options={chartOptions} />
             
             {/* Center Content */}
