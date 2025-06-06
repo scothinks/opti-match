@@ -362,7 +362,7 @@ export default function Home() {
                   </div>
                   <div className="min-w-0 flex-1 overflow-hidden">
                     <h4 className="font-semibold text-slate-800 mb-1">Source File</h4>
-                    <p className="text-sm text-slate-600 truncate break-all" title={sourceFile?.name}>
+                    <p className="text-sm text-slate-600 truncate" title={sourceFile?.name}>
                       {sourceFile?.name}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
@@ -378,7 +378,7 @@ export default function Home() {
                   </div>
                   <div className="min-w-0 flex-1 overflow-hidden">
                     <h4 className="font-semibold text-slate-800 mb-1">Validation File</h4>
-                    <p className="text-sm text-slate-600 truncate break-all" title={toValidateFile?.name}>
+                    <p className="text-sm text-slate-600 truncate" title={toValidateFile?.name}>
                       {toValidateFile?.name}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
