@@ -78,7 +78,7 @@ export default function Home() {
 
   const steps = ['Upload Files', 'Configure', 'Validate', 'Results'];
 
-  // This effect now only triggers when the files URLs are available.
+  // This effect now only triggers when the file URLs are available.
   useEffect(() => {
     if (sourceFileUrl && toValidateFileUrl) {
       setShowPreview(true);
@@ -124,7 +124,7 @@ export default function Home() {
 
   // NEW: Handles file selection and uploads it to Vercel Blob via our new API route
   const handleFileSelectAndUpload = async (file: File | null, fileType: 'source' | 'validation') => {
-    // Clear previous states
+    // Clear previous states for the selected file type
     if (fileType === 'source') {
         setSourceFile(file);
         setSourceFileUrl(null);
@@ -133,11 +133,12 @@ export default function Home() {
         setToValidateFileUrl(null);
     }
 
-    if (!file) return;
+    if (!file) return; // Stop if a file was cleared
 
     // Set loading state for the specific uploader
     if (fileType === 'source') setIsUploadingSource(true);
     else setIsUploadingValidation(true);
+    showNotification(`Uploading ${file.name}...`, 'info');
 
     try {
         const response = await fetch(`/api/upload?filename=${file.name}`, {
@@ -159,7 +160,7 @@ export default function Home() {
         showNotification(`${file.name} uploaded successfully.`, 'success');
     } catch (error) {
         console.error('An error occurred during upload:', error);
-        showNotification(`Failed to upload ${file.name}.`, 'error');
+        showNotification(`Failed to upload ${file.name}. Please try again.`, 'error');
         // Clear the failed file selection
         if (fileType === 'source') setSourceFile(null);
         else setToValidateFile(null);
@@ -184,7 +185,6 @@ export default function Home() {
     showNotification('Starting comprehensive validation...', 'info');
 
     try {
-      // REMOVED: Client-side parsing is no longer done here.
       setStatus('Processing data with our matching algorithms...');
 
       // MODIFIED: Sends the blob URLs to the backend
@@ -195,8 +195,15 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.details || 'Validation failed on server');
+        // Now we can try to parse the error as JSON, but have a fallback
+        let errorDetails = 'Validation failed on server.';
+        try {
+            const errorData = await res.json();
+            errorDetails = errorData.details || errorData.error || errorDetails;
+        } catch (jsonError) {
+            errorDetails = await res.text(); // Fallback to raw text if not JSON
+        }
+        throw new Error(errorDetails);
       }
 
       const result: ApiResponse = await res.json();
@@ -241,7 +248,6 @@ export default function Home() {
 
   // Determine if the main validation button should be disabled
   const isValidationDisabled = isUploadingSource || isUploadingValidation || isLoading;
-
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
@@ -433,7 +439,7 @@ export default function Home() {
                   <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
                 <p className="text-sm text-slate-500 mt-3">
-                  Advanced matching algorithms will compare and validate your data
+                  Click to begin validation against the source file.
                 </p>
               </div>
             </div>
