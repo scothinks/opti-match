@@ -120,7 +120,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
                   {isDragOver ? 'Drop your file here' : 'Choose file or drag & drop'}
                 </p>
                 <p className="text-sm text-slate-500">
-                  Excel files only • Max 10MB
+                  CSV and Excel files only • Max 10MB
                 </p>
               </div>
 

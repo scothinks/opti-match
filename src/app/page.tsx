@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import * as XLSX from 'xlsx';
 import {
   Upload,
   Zap,
@@ -55,6 +54,15 @@ interface ApiResponse {
 export default function Home() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [toValidateFile, setToValidateFile] = useState<File | null>(null);
+  
+  // NEW: State for Vercel Blob URLs
+  const [sourceFileUrl, setSourceFileUrl] = useState<string | null>(null);
+  const [toValidateFileUrl, setToValidateFileUrl] = useState<string | null>(null);
+
+  // NEW: State to track upload progress
+  const [isUploadingSource, setIsUploadingSource] = useState(false);
+  const [isUploadingValidation, setIsUploadingValidation] = useState(false);
+
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
   const [status, setStatus] = useState('');
@@ -70,18 +78,16 @@ export default function Home() {
 
   const steps = ['Upload Files', 'Configure', 'Validate', 'Results'];
 
-  // ** MODIFIED useEffect TO PREVENT CONFLICT **
-  // This effect now only triggers when the files themselves are selected or cleared.
+  // This effect now only triggers when the files URLs are available.
   useEffect(() => {
-    if (sourceFile && toValidateFile) {
+    if (sourceFileUrl && toValidateFileUrl) {
       setShowPreview(true);
       setCurrentStep(1);
     } else {
-      // This ensures that if a file is removed, we go back to the upload step.
       setShowPreview(false);
       setCurrentStep(0);
     }
-  }, [sourceFile, toValidateFile]);
+  }, [sourceFileUrl, toValidateFileUrl]);
 
   // This separate effect handles advancing to the results step.
   useEffect(() => {
@@ -116,39 +122,59 @@ export default function Home() {
     };
   };
 
-  const parseExcel = async (file: File) => {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    // --- Dynamic Header Detection Logic ---
-    // 1. Convert only the first two rows to an array of arrays for inspection.
-    const rows = XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      range: 2,
-    }) as any[][]; // Type assertion to fix the error
-
-    const firstRow: any[] = rows[0] || [];
-    const secondRow: any[] = rows[1] || [];
-
-    // 2. Count the number of non-empty cells in each row.
-    const firstRowCellCount = firstRow.filter((cell) => cell != null && cell !== '').length;
-    const secondRowCellCount = secondRow.filter((cell) => cell != null && cell !== '').length;
-
-    // 3. Apply the heuristic: If the second row has more columns than the first,
-    //    and the first row looks like a title, assume the second row is the header.
-    let startRow = 0; // Default to the first row (index 0)
-    if (secondRowCellCount > firstRowCellCount && firstRowCellCount <= 2) {
-      startRow = 1; // Set start to the second row (index 1)
+  // NEW: Handles file selection and uploads it to Vercel Blob via our new API route
+  const handleFileSelectAndUpload = async (file: File | null, fileType: 'source' | 'validation') => {
+    // Clear previous states
+    if (fileType === 'source') {
+        setSourceFile(file);
+        setSourceFileUrl(null);
+    } else {
+        setToValidateFile(file);
+        setToValidateFileUrl(null);
     }
 
-    // 4. Parse the entire sheet into JSON using the dynamically determined start row.
-    return XLSX.utils.sheet_to_json(sheet, { range: startRow });
+    if (!file) return;
+
+    // Set loading state for the specific uploader
+    if (fileType === 'source') setIsUploadingSource(true);
+    else setIsUploadingValidation(true);
+
+    try {
+        const response = await fetch(`/api/upload?filename=${file.name}`, {
+            method: 'POST',
+            body: file,
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upload failed: ${await response.text()}`);
+        }
+        
+        const newBlob = await response.json();
+
+        if (fileType === 'source') {
+            setSourceFileUrl(newBlob.url);
+        } else {
+            setToValidateFileUrl(newBlob.url);
+        }
+        showNotification(`${file.name} uploaded successfully.`, 'success');
+    } catch (error) {
+        console.error('An error occurred during upload:', error);
+        showNotification(`Failed to upload ${file.name}.`, 'error');
+        // Clear the failed file selection
+        if (fileType === 'source') setSourceFile(null);
+        else setToValidateFile(null);
+    } finally {
+        if (fileType === 'source') setIsUploadingSource(false);
+        else setIsUploadingValidation(false);
+    }
   };
 
   const handleValidation = async () => {
-    if (!sourceFile || !toValidateFile) return;
+    // MODIFIED: Checks for URLs instead of file objects
+    if (!sourceFileUrl || !toValidateFileUrl) {
+        showNotification('Please ensure both files are uploaded successfully before validation.', 'error');
+        return;
+    }
 
     setIsLoading(true);
     setCurrentStep(2);
@@ -158,17 +184,13 @@ export default function Home() {
     showNotification('Starting comprehensive validation...', 'info');
 
     try {
-      setStatus('Parsing Excel files...');
-      const [sourceData, toValidateData] = await Promise.all([
-        parseExcel(sourceFile),
-        parseExcel(toValidateFile),
-      ]);
-
+      // REMOVED: Client-side parsing is no longer done here.
       setStatus('Processing data with our matching algorithms...');
 
+      // MODIFIED: Sends the blob URLs to the backend
       const res = await fetch('/api/validate', {
         method: 'POST',
-        body: JSON.stringify({ source: sourceData, entries: toValidateData }),
+        body: JSON.stringify({ sourceUrl: sourceFileUrl, toValidateUrl: toValidateFileUrl }),
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -186,7 +208,6 @@ export default function Home() {
       setValidationStats(calculateStats(result.results));
       setProcessingTime(parseFloat(duration));
       setStatus('');
-      // The results useEffect will now handle setting the step to 3
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       showNotification(`Validation failed: ${errorMessage}`, 'error');
@@ -202,20 +223,25 @@ export default function Home() {
     setResults([]);
     setSourceFile(null);
     setToValidateFile(null);
+    // MODIFIED: Also reset the blob URLs
+    setSourceFileUrl(null);
+    setToValidateFileUrl(null);
     setDetectedHeaders([]);
     setStatus('');
-    // The file useEffect will handle resetting the step to 0
-    setShowPreview(false); // Explicitly set here for clarity
+    setShowPreview(false);
     setValidationStats(null);
     setProcessingTime(0);
     showNotification('Session cleared - ready for new validation', 'info');
   };
 
   const handleEditFiles = () => {
-    // This function now works because the main useEffect no longer fights it
     setShowPreview(false);
     setCurrentStep(0);
   };
+
+  // Determine if the main validation button should be disabled
+  const isValidationDisabled = isUploadingSource || isUploadingValidation || isLoading;
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
@@ -326,7 +352,7 @@ export default function Home() {
                     <p className="text-sm text-slate-500">Your master reference dataset (Optima)</p>
                   </div>
                 </div>
-                <FileUploader onFileSelect={setSourceFile} file={sourceFile} label={''} warningText={uploaderWarning} />
+                <FileUploader onFileSelect={(file) => handleFileSelectAndUpload(file, 'source')} file={sourceFile} label={''} warningText={uploaderWarning} />
               </div>
 
               <div className="space-y-4">
@@ -339,7 +365,7 @@ export default function Home() {
                     <p className="text-sm text-slate-500">Entries to validate against source</p>
                   </div>
                 </div>
-                <FileUploader onFileSelect={setToValidateFile} file={toValidateFile} label={''} warningText={uploaderWarning} />
+                <FileUploader onFileSelect={(file) => handleFileSelectAndUpload(file, 'validation')} file={toValidateFile} label={''} warningText={uploaderWarning} />
               </div>
             </div>
           </div>
@@ -397,11 +423,12 @@ export default function Home() {
               <div className="text-center">
                 <button
                   onClick={handleValidation}
-                  className="group relative overflow-hidden bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white px-8 py-4 rounded-2xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 hover:shadow-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/50"
+                  disabled={isValidationDisabled}
+                  className="group relative overflow-hidden bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white px-8 py-4 rounded-2xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 hover:shadow-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <Zap className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-                    Start Validation
+                    {isLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5 group-hover:rotate-12 transition-transform" />}
+                    {isLoading ? 'Validating...' : isUploadingSource ? 'Uploading Source...' : isUploadingValidation ? 'Uploading Validation...' : 'Start Validation'}
                   </div>
                   <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 </button>
