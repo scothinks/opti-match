@@ -68,7 +68,7 @@ export default function MatchChart({ data }: Props) {
           'rgba(239, 68, 68, 0.9)'
         ],
         hoverBorderWidth: 3,
-        cutout: '65%' // Increased cutout for better mobile center space
+        cutout: '70%' // Increased cutout for better mobile center space
       }
     ]
   };
@@ -163,22 +163,33 @@ export default function MatchChart({ data }: Props) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-center">
-        {/* Chart Container - Fixed for Mobile */}
-        <div className="relative flex justify-center">
-          <div className="relative w-72 h-72 sm:w-80 sm:h-80">
-            <Doughnut data={chartData} options={chartOptions} />
+        {/* Chart Container - Responsive for all devices */}
+        <div className="relative">
+          <div className="relative mx-auto w-64 h-64 sm:w-72 sm:h-72 lg:w-80 lg:h-80">
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              <Doughnut data={chartData} options={chartOptions} />
+            </div>
             
-            {/* Center Content - Properly Positioned for Mobile */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-1 mb-1">
-                  <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4 text-indigo-500" />
-                  <span className="text-xs sm:text-sm font-medium text-slate-600">Total</span>
+            {/* Center Content - Scaled to chart size */}
+            <div 
+              className="absolute pointer-events-none flex items-center justify-center"
+              style={{
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '50%',
+                height: '50%'
+              }}
+            >
+              <div className="text-center w-full">
+                <div className="flex items-center justify-center gap-0.5 sm:gap-1 mb-0.5 sm:mb-1">
+                  <TrendingUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 lg:w-4 lg:h-4 text-indigo-500" />
+                  <span className="text-[10px] sm:text-xs lg:text-sm font-medium text-slate-600">Total</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
+                <div className="text-lg sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent leading-tight">
                   {stats.total}
                 </div>
-                <div className="text-xs sm:text-sm text-slate-500">Records</div>
+                <div className="text-[9px] sm:text-xs lg:text-sm text-slate-500">Records</div>
               </div>
             </div>
           </div>
