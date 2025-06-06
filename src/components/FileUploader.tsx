@@ -5,10 +5,8 @@ import { Upload, FileSpreadsheet, CheckCircle2, X, Info } from 'lucide-react';
 
 type Props = {
   label: string;
-  // Type updated to allow null for safer file removal
   onFileSelect: (file: File | null) => void;
   file?: File | null;
-  // New optional prop for the warning message
   warningText?: string;
 };
 
@@ -50,7 +48,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
 
   const handleRemoveFile = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onFileSelect(null); // No longer requires 'as any'
+    onFileSelect(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -101,19 +99,21 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
           bg-gradient-to-br from-indigo-500/5 to-purple-500/5
         `} />
 
-        <div className="relative p-8">
+        {/* --- MOBILE OPTIMIZATION: Use less padding on smaller screens --- */}
+        <div className="relative p-6 sm:p-8">
           {!file ? (
             <div className="text-center">
               {/* Upload Icon */}
+              {/* --- MOBILE OPTIMIZATION: Make icon slightly smaller on mobile --- */}
               <div className={`
-                w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center transition-all duration-300
+                w-14 h-14 sm:w-16 sm:h-16 mx-auto mb-4 rounded-full flex items-center justify-center transition-all duration-300
                 ${isDragOver 
                   ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white scale-110' 
                   : 'bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600'
                 }
                 ${isHovered ? 'bg-gradient-to-br from-indigo-400 to-purple-500 text-white transform scale-105' : ''}
               `}>
-                <Upload className={`w-7 h-7 transition-transform duration-300 ${isDragOver || isHovered ? 'scale-110' : ''}`} />
+                <Upload className={`w-6 h-6 sm:w-7 sm:h-7 transition-transform duration-300 ${isDragOver || isHovered ? 'scale-110' : ''}`} />
               </div>
 
               {/* Text */}
@@ -126,7 +126,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
                 </p>
               </div>
 
-              {/* --- NEW WARNING DISPLAY --- */}
+              {/* Warning Display */}
               {warningText && (
                 <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left">
                   <div className="flex items-start gap-2">
@@ -141,10 +141,11 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
               <div className="absolute bottom-4 left-4 w-3 h-3 bg-purple-200 rounded-full opacity-40" />
             </div>
           ) : (
-            <div className="flex items-center gap-4">
+            // --- MOBILE OPTIMIZATION: Reduce gap and icon size for a compact view ---
+            <div className="flex items-center gap-3 sm:gap-4">
               {/* File Icon */}
-              <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
-                <FileSpreadsheet className="w-6 h-6 text-white" />
+              <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
 
               {/* File Info */}

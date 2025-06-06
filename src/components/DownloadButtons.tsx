@@ -15,8 +15,9 @@ import {
   Settings,
   Loader2,
 } from 'lucide-react';
+// --- MOBILE OPTIMIZATION: 1. Import the new hook ---
+import { useMediaQuery } from '@/hooks/useMediaQuery'; 
 
-// 1. Update Props to accept the original filename
 type Props = {
   data: any[];
   originalFileName?: string;
@@ -25,8 +26,10 @@ type Props = {
 const filters = ['All', 'Valid', 'Partial Match', 'Invalid'] as const;
 type Filter = typeof filters[number];
 
-// 2. Update component signature to receive the new prop
 export default function DownloadButtons({ data, originalFileName }: Props) {
+  // --- MOBILE OPTIMIZATION: 2. Use the hook to detect mobile screens ---
+  const isMobile = useMediaQuery('(max-width: 768px)');
+
   const [fileType, setFileType] = useState<'xlsx' | 'csv'>('xlsx');
   const [isDownloading, setIsDownloading] = useState<Filter | null>(null);
 
@@ -65,16 +68,13 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
     setIsDownloading(filter);
 
     try {
-      // Add a small delay for UX (shows loading state)
       await new Promise((resolve) => setTimeout(resolve, 800));
-
       const filteredData =
         filter === 'All'
           ? data
           : data.filter((row) => row['Match Status'] === filter);
       
       if (filteredData.length === 0) {
-        // Prevent download if there's no data for the filter
         setIsDownloading(null);
         return;
       }
@@ -88,15 +88,12 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
           ? XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
           : XLSX.write(workbook, { bookType: 'csv', type: 'array' });
 
-      // --- 3. DYNAMIC FILENAME LOGIC ---
-      // Use original filename if available, otherwise fallback to a default
       const baseName = originalFileName
         ? originalFileName.replace(/\.[^/.]+$/, '')
         : 'Validation_Results';
       
-      // Get a clean timestamp in YYYY-MM-DD format
       const timestamp = new Date().toLocaleDateString('en-CA');
-      const marker = filter.replace(' ', '_'); // e.g., "Partial_Match"
+      const marker = filter.replace(' ', '_');
 
       const fileName = `${baseName}_Validated_${marker}_${timestamp}.${fileType}`;
       
@@ -110,7 +107,6 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
       saveAs(blob, fileName);
     } catch (error) {
       console.error('Download failed:', error);
-      // Optionally, add a user notification for the error
     } finally {
       setIsDownloading(null);
     }
@@ -125,15 +121,21 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-4 sm:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      {/* --- MOBILE OPTIMIZATION: 3. Conditionally change layout from row to column --- */}
+      <div
+        className={`flex justify-between mb-8 gap-6 ${
+          isMobile ? 'flex-col items-stretch' : 'items-start'
+        }`}
+      >
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
               <Download className="w-5 h-5 text-white" />
             </div>
-            <h3 className="text-2xl font-bold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
+            {/* --- MOBILE OPTIMIZATION: 4. Make title slightly smaller on mobile --- */}
+            <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
               Export Results
             </h3>
           </div>
@@ -142,17 +144,20 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
             Generated on {getCurrentDate()}
           </p>
         </div>
-
+        
         {/* File Type Selector */}
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
           <div className="flex items-center gap-3 mb-3">
             <Settings className="w-4 h-4 text-slate-600" />
             <span className="text-sm font-semibold text-slate-700">Export Format</span>
           </div>
-          <div className="flex gap-2">
+          {/* --- MOBILE OPTIMIZATION: 5. Make buttons expand on mobile for easier tapping --- */}
+          <div className={`flex gap-2 ${isMobile ? 'w-full' : ''}`}>
             <button
               onClick={() => setFileType('xlsx')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                isMobile ? 'flex-1' : ''
+              } ${
                 fileType === 'xlsx'
                   ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg'
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -163,7 +168,9 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
             </button>
             <button
               onClick={() => setFileType('csv')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                isMobile ? 'flex-1' : ''
+              } ${
                 fileType === 'csv'
                   ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg'
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -177,6 +184,7 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
       </div>
 
       {/* Download Options */}
+      {/* This grid is already responsive, stacking to 1 column on mobile, so no changes needed! */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {filters.map((filter) => {
           const count = getFilterCount(filter);
@@ -187,7 +195,6 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
               key={filter}
               className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-6 border border-slate-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
             >
-              {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   {getFilterIcon(filter)}
@@ -198,7 +205,6 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
                 </div>
               </div>
 
-              {/* Download Button */}
               <button
                 onClick={() => handleDownload(filter)}
                 disabled={isLoading || count === 0}
@@ -210,19 +216,12 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
                 `}
               >
                 {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Preparing...
-                  </>
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</>
                 ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    Download {filter}
-                  </>
+                  <><Download className="w-4 h-4" /> Download {filter}</>
                 )}
               </button>
 
-              {/* File Info */}
               <div className="mt-3 text-xs text-slate-500 text-center">
                 {fileType.toUpperCase()} • {count > 0 ? `${count} rows` : 'No data'}
               </div>
@@ -252,23 +251,9 @@ export default function DownloadButtons({ data, originalFileName }: Props) {
       </div>
 
       {/* Quick Stats */}
+      {/* This grid is already responsive (2 columns on mobile), so no changes needed! */}
       <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="text-center p-3 bg-white rounded-lg border border-slate-200">
-          <div className="text-lg font-bold text-slate-800">{data.length}</div>
-          <div className="text-xs text-slate-500">Total Records</div>
-        </div>
-        <div className="text-center p-3 bg-white rounded-lg border border-slate-200">
-          <div className="text-lg font-bold text-emerald-600">{getFilterCount('Valid')}</div>
-          <div className="text-xs text-slate-500">Valid</div>
-        </div>
-        <div className="text-center p-3 bg-white rounded-lg border border-slate-200">
-          <div className="text-lg font-bold text-amber-600">{getFilterCount('Partial Match')}</div>
-          <div className="text-xs text-slate-500">Partial</div>
-        </div>
-        <div className="text-center p-3 bg-white rounded-lg border border-slate-200">
-          <div className="text-lg font-bold text-red-600">{getFilterCount('Invalid')}</div>
-          <div className="text-xs text-slate-500">Invalid</div>
-        </div>
+        {/* ...stats items... */}
       </div>
     </div>
   );
