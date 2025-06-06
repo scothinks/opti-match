@@ -25,8 +25,8 @@ type ProcessedEntry = Entry & {
 
 // Configuration constants
 const SIMILARITY_THRESHOLD = 90;
-const MAX_ENTRIES_LIMIT = 10000;
-const MAX_SOURCE_LIMIT = 50000;
+const MAX_ENTRIES_LIMIT = 20000;
+const MAX_SOURCE_LIMIT = 500000;
 
 // Enhanced normalization with better safety checks
 function normalize(value: unknown): string {
@@ -176,16 +176,49 @@ function extractField(entry: Entry, possibleFieldNames: string[], headerRow?: En
   return '';
 }
 
-// Safe string extraction for return values
-function safeStringExtract(entry: Entry, fieldNames: string[]): string {
-  for (const fieldName of fieldNames) {
-    const value = entry[fieldName];
-    if (value !== null && value !== undefined) {
-      const stringValue = String(value).trim();
-      if (stringValue) return stringValue;
-    }
+// *** NEW FUNCTION TO HANDLE SPLIT NAMES ***
+function extractFullName(entry: Entry, headerRow?: Entry): string {
+  // First, try to find a single "full name" column for backward compatibility.
+  const singleFullName = extractField(
+    entry,
+    ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name'],
+    headerRow
+  );
+  if (singleFullName) {
+    return singleFullName;
   }
+
+  // If not found, look for individual parts and combine them.
+  const firstName = extractField(entry, ['firstname', 'first_name', 'first'], headerRow);
+  const middleName = extractField(entry, ['middlename', 'middle_name', 'middle'], headerRow);
+  const lastName = extractField(entry, ['lastname', 'last_name', 'last', 'surname'], headerRow);
+
+  const nameParts = [firstName, middleName, lastName].filter(Boolean); // filter(Boolean) removes any empty parts
+
+  if (nameParts.length > 0) {
+    return normalize(nameParts.join(' '));
+  }
+
   return '';
+}
+
+
+// Safe string extraction for return values
+function safeStringExtract(entry: Entry, fieldNames: string[], headerRow?: Entry): string {
+    // For name, use the new intelligent extraction
+    if (fieldNames.some(name => name.toLowerCase().includes('name'))) {
+        return extractFullName(entry, headerRow);
+    }
+
+    // For other fields, use the original logic
+    for (const fieldName of fieldNames) {
+        const value = entry[fieldName];
+        if (value !== null && value !== undefined) {
+        const stringValue = String(value).trim();
+        if (stringValue) return stringValue;
+        }
+    }
+    return '';
 }
 
 // Enhanced request payload validation
@@ -271,11 +304,8 @@ function getMatchStatus(
       entryHeaderRow
     );
     
-    const entryName = extractField(
-      entry,
-      ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name', '__EMPTY_2', '__EMPTY_3'],
-      entryHeaderRow
-    );
+    // ** USE THE NEW NAME EXTRACTION FUNCTION **
+    const entryName = extractFullName(entry, entryHeaderRow);
 
     if (!entryName) {
       const availableFields = Object.entries(entry)
@@ -335,7 +365,8 @@ function getMatchStatus(
     for (const match of potentialMatches) {
       const srcSSID = extractField(match, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
       const srcNIN = extractField(match, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
-      const srcName = extractField(match, ['FULL NAME', 'Full Name', 'name', 'Name'], sourceHeaderRow);
+      // ** USE THE NEW NAME EXTRACTION FUNCTION **
+      const srcName = extractFullName(match, sourceHeaderRow);
 
       let score = 0;
       if (entrySSID && srcSSID && srcSSID === entrySSID) score += 40;
@@ -350,7 +381,8 @@ function getMatchStatus(
 
     const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
     const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
-    const srcName = extractField(bestMatch, ['FULL NAME', 'Full Name', 'name', 'Name'], sourceHeaderRow);
+    // ** USE THE NEW NAME EXTRACTION FUNCTION **
+    const srcName = extractFullName(bestMatch, sourceHeaderRow);
 
     if (!srcName) {
       return {
@@ -376,7 +408,7 @@ function getMatchStatus(
       return {
         status: 'Valid',
         reason: `Verified (${nameSimilarity}% name match)`,
-        matchedName: safeStringExtract(bestMatch, ['FULL NAME', 'Full Name', 'name', 'Name']),
+        matchedName: srcName,
         matchedSSID: safeStringExtract(bestMatch, ['SSID', 'ssid', 'Ssid']),
         matchedNIN: safeStringExtract(bestMatch, ['NIN', 'nin', 'Nin']),
         similarity: nameSimilarity
@@ -403,7 +435,7 @@ function getMatchStatus(
     return {
       status: 'Partial Match',
       reason: `Verification issues - ${mismatches.join('; ')}`,
-      matchedName: safeStringExtract(bestMatch, ['FULL NAME', 'Full Name', 'name', 'Name']),
+      matchedName: srcName,
       matchedSSID: safeStringExtract(bestMatch, ['SSID', 'ssid', 'Ssid']),
       matchedNIN: safeStringExtract(bestMatch, ['NIN', 'nin', 'Nin']),
       similarity: nameSimilarity

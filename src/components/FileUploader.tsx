@@ -37,7 +37,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
     setIsDragOver(false);
     
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && (droppedFile.name.endsWith('.xlsx') || droppedFile.name.endsWith('.xls'))) {
+    if (droppedFile && (droppedFile.name.endsWith('.xlsx') || droppedFile.name.endsWith('.xls') || droppedFile.name.endsWith('.csv'))) {
       onFileSelect(droppedFile);
     }
   };
@@ -177,7 +177,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.csv"
         onChange={handleFileChange}
         className="hidden"
       />
