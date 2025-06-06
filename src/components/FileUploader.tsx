@@ -63,7 +63,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
   };
 
   return (
-    <div className="w-full max-w-full box-border">
+    <div className="w-full max-w-full box-border overflow-hidden">
       {/* Label */}
       <div className="mb-4">
         <h3 className="text-lg font-semibold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
@@ -139,21 +139,21 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
               <div className="absolute bottom-4 left-4 w-3 h-3 bg-purple-200 rounded-full opacity-40" />
             </div>
           ) : (
-            <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0 overflow-hidden">
               {/* File Icon */}
               <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
 
-              {/* File Info - FIXED VERSION */}
-              <div className="flex-1 min-w-0 overflow-hidden">
-                <div className="flex items-center min-w-0">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mr-2" />
-                  <p className="font-semibold text-slate-700 truncate min-w-0">
+              {/* File Info - ENHANCED FIX */}
+              <div className="flex-1 min-w-0 max-w-0 overflow-hidden">
+                <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                  <p className="font-semibold text-slate-700 truncate overflow-hidden text-ellipsis whitespace-nowrap">
                     {file.name}
                   </p>
                 </div>
-                <p className="text-sm text-slate-500">{formatFileSize(file.size)}</p>
+                <p className="text-sm text-slate-500 truncate">{formatFileSize(file.size)}</p>
               </div>
 
               {/* Remove Button */}
