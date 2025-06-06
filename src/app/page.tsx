@@ -1,6 +1,6 @@
 'use client';
 
-import { SetStateAction, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Upload,
@@ -17,7 +17,7 @@ import {
   X,
   Clock,
   Database,
-  Download
+  Download,
 } from 'lucide-react';
 
 // Import components (these would be in separate files)
@@ -40,10 +40,23 @@ interface ValidationStats {
   accuracy: string;
 }
 
+interface ApiResponse {
+  results: ValidationResult[];
+  headers?: string[];
+  summary?: {
+    total: number;
+    valid: number;
+    invalid: number;
+    partialMatch: number;
+    processingErrors: number;
+  };
+}
+
 export default function Home() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [toValidateFile, setToValidateFile] = useState<File | null>(null);
   const [results, setResults] = useState<ValidationResult[]>([]);
+  const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -53,6 +66,7 @@ export default function Home() {
   const [validationStats, setValidationStats] = useState<ValidationStats | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [processingTime, setProcessingTime] = useState(0);
+  const uploaderWarning = "For best results, please ensure the header is the first row.";
 
   const steps = ['Upload Files', 'Configure', 'Validate', 'Results'];
 
@@ -75,8 +89,10 @@ export default function Home() {
     setTimeout(() => setShowToast(false), 4000);
   };
 
-  // Updated calculateStats to use `status` instead of `matchType`
   const calculateStats = (data: ValidationResult[]): ValidationStats => {
+    if (data.length === 0) {
+      return { total: 0, exact: 0, partial: 0, none: 0, accuracy: '0.0' };
+    }
     const totalEntries = data.length;
     const exactMatches = data.filter((item) => item.status === 'Valid').length;
     const partialMatches = data.filter((item) => item.status === 'Partial Match').length;
@@ -87,8 +103,39 @@ export default function Home() {
       exact: exactMatches,
       partial: partialMatches,
       none: noMatches,
-      accuracy: ((exactMatches / totalEntries) * 100).toFixed(1)
+      accuracy: ((exactMatches / totalEntries) * 100).toFixed(1),
     };
+  };
+
+  const parseExcel = async (file: File) => {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // --- Dynamic Header Detection Logic ---
+    // 1. Convert only the first two rows to an array of arrays for inspection.
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      range: 2,
+    }) as any[][]; // Type assertion to fix the error
+
+    const firstRow: any[] = rows[0] || [];
+    const secondRow: any[] = rows[1] || [];
+
+    // 2. Count the number of non-empty cells in each row.
+    const firstRowCellCount = firstRow.filter((cell) => cell != null && cell !== '').length;
+    const secondRowCellCount = secondRow.filter((cell) => cell != null && cell !== '').length;
+
+    // 3. Apply the heuristic: If the second row has more columns than the first,
+    //    and the first row looks like a title, assume the second row is the header.
+    let startRow = 0; // Default to the first row (index 0)
+    if (secondRowCellCount > firstRowCellCount && firstRowCellCount <= 2) {
+      startRow = 1; // Set start to the second row (index 1)
+    }
+
+    // 4. Parse the entire sheet into JSON using the dynamically determined start row.
+    return XLSX.utils.sheet_to_json(sheet, { range: startRow });
   };
 
   const handleValidation = async () => {
@@ -102,18 +149,10 @@ export default function Home() {
     showNotification('Starting comprehensive validation...', 'info');
 
     try {
-      const parseExcel = async (file: File) => {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data);
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        return XLSX.utils.sheet_to_json(sheet);
-      };
-
       setStatus('Parsing Excel files...');
       const [sourceData, toValidateData] = await Promise.all([
         parseExcel(sourceFile),
-        parseExcel(toValidateFile)
+        parseExcel(toValidateFile),
       ]);
 
       setStatus('Processing data with our matching algorithms...');
@@ -121,18 +160,20 @@ export default function Home() {
       const res = await fetch('/api/validate', {
         method: 'POST',
         body: JSON.stringify({ source: sourceData, entries: toValidateData }),
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!res.ok) {
-        throw new Error('Validation failed on server');
+        const errorData = await res.json();
+        throw new Error(errorData.details || 'Validation failed on server');
       }
 
-      const result = await res.json();
+      const result: ApiResponse = await res.json();
       const endTime = Date.now();
       const duration = ((endTime - startTime) / 1000).toFixed(1);
 
       setResults(result.results);
+      setDetectedHeaders(result.headers || []);
       setValidationStats(calculateStats(result.results));
       setProcessingTime(parseFloat(duration));
       setStatus('');
@@ -140,7 +181,8 @@ export default function Home() {
 
       showNotification(`Validation completed in ${duration}s! Found ${result.results.length} entries.`, 'success');
     } catch (error) {
-      showNotification('Validation failed. Please check your files and try again.', 'error');
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      showNotification(`Validation failed: ${errorMessage}`, 'error');
       setStatus('');
       setCurrentStep(1);
       console.error('Validation error:', error);
@@ -153,6 +195,7 @@ export default function Home() {
     setResults([]);
     setSourceFile(null);
     setToValidateFile(null);
+    setDetectedHeaders([]);
     setStatus('');
     setCurrentStep(0);
     setShowPreview(false);
@@ -191,7 +234,10 @@ export default function Home() {
                 {toastType === 'info' && <Info className="w-5 h-5 flex-shrink-0" />}
                 <span className="text-sm">{toastMessage}</span>
               </div>
-              <button onClick={() => setShowToast(false)} className="text-white/80 hover:text-white transition-colors">
+              <button
+                onClick={() => setShowToast(false)}
+                className="text-white/80 hover:text-white transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -218,7 +264,8 @@ export default function Home() {
             OptiMatch
           </h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            Intelligent ID validation with advanced matching algorithms, real-time analytics, and comprehensive reporting
+            Intelligent ID validation with advanced matching algorithms, real-time analytics, and comprehensive
+            reporting
           </p>
         </div>
 
@@ -271,7 +318,7 @@ export default function Home() {
                     <p className="text-sm text-slate-500">Your master reference dataset (Optima)</p>
                   </div>
                 </div>
-                <FileUploader onFileSelect={setSourceFile} file={sourceFile} label={''} />
+                <FileUploader onFileSelect={setSourceFile} file={sourceFile} label={''} warningText={uploaderWarning} />
               </div>
 
               <div className="space-y-4">
@@ -284,7 +331,7 @@ export default function Home() {
                     <p className="text-sm text-slate-500">Entries to validate against source</p>
                   </div>
                 </div>
-                <FileUploader onFileSelect={setToValidateFile} file={toValidateFile} label={''} />
+                <FileUploader onFileSelect={setToValidateFile} file={toValidateFile} label={''} warningText={uploaderWarning} />
               </div>
             </div>
           </div>
@@ -426,16 +473,16 @@ export default function Home() {
                 <Download className="w-6 h-6 text-indigo-600" />
                 <h3 className="text-xl font-semibold text-slate-800">Export Results</h3>
               </div>
-              <DownloadButtons data={results} />
+              <DownloadButtons data={results}  originalFileName={toValidateFile?.name}/>
             </div>
 
-            {/* Results Table */}
+            {/* Results Table - Pass headers prop correctly */}
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-6">
                 <FileText className="w-6 h-6 text-indigo-600" />
                 <h3 className="text-xl font-semibold text-slate-800">Detailed Results</h3>
               </div>
-              <ResultTable data={results} />
+              <ResultTable data={results} responseHeaders={detectedHeaders} />
             </div>
           </div>
         )}
@@ -449,8 +496,8 @@ export default function Home() {
               </div>
               <h3 className="text-2xl font-bold text-slate-800 mb-4">Welcome to OptiMatch</h3>
               <p className="text-slate-600 mb-8 leading-relaxed">
-                Upload your Excel files to begin intelligent ID validation with advanced matching algorithms.
-                Get detailed insights, accuracy metrics, and comprehensive reports.
+                Upload your Excel files to begin intelligent ID validation with advanced matching algorithms. Get
+                detailed insights, accuracy metrics, and comprehensive reports.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">

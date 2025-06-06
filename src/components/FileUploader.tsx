@@ -1,15 +1,18 @@
 'use client';
 
 import { ChangeEvent, useState, useRef } from 'react';
-import { Upload, FileSpreadsheet, CheckCircle2, X } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle2, X, Info } from 'lucide-react';
 
 type Props = {
   label: string;
-  onFileSelect: (file: File) => void;
+  // Type updated to allow null for safer file removal
+  onFileSelect: (file: File | null) => void;
   file?: File | null;
+  // New optional prop for the warning message
+  warningText?: string;
 };
 
-export default function FileUploader({ label, onFileSelect, file }: Props) {
+export default function FileUploader({ label, onFileSelect, file, warningText }: Props) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +50,7 @@ export default function FileUploader({ label, onFileSelect, file }: Props) {
 
   const handleRemoveFile = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onFileSelect(null as any);
+    onFileSelect(null); // No longer requires 'as any'
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -122,6 +125,16 @@ export default function FileUploader({ label, onFileSelect, file }: Props) {
                   Excel files only • Max 10MB
                 </p>
               </div>
+
+              {/* --- NEW WARNING DISPLAY --- */}
+              {warningText && (
+                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left">
+                  <div className="flex items-start gap-2">
+                    <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-amber-700">{warningText}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Decorative Elements */}
               <div className="absolute top-4 right-4 w-2 h-2 bg-indigo-200 rounded-full opacity-60" />

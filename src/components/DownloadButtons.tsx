@@ -3,27 +3,30 @@
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { useState } from 'react';
-import { 
-  Download, 
-  FileSpreadsheet, 
-  FileText, 
-  CheckCircle2, 
-  AlertTriangle, 
-  XCircle, 
+import {
+  Download,
+  FileSpreadsheet,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
   Database,
   Calendar,
   Settings,
-  Loader2
+  Loader2,
 } from 'lucide-react';
 
+// 1. Update Props to accept the original filename
 type Props = {
   data: any[];
+  originalFileName?: string;
 };
 
 const filters = ['All', 'Valid', 'Partial Match', 'Invalid'] as const;
 type Filter = typeof filters[number];
 
-export default function DownloadButtons({ data }: Props) {
+// 2. Update component signature to receive the new prop
+export default function DownloadButtons({ data, originalFileName }: Props) {
   const [fileType, setFileType] = useState<'xlsx' | 'csv'>('xlsx');
   const [isDownloading, setIsDownloading] = useState<Filter | null>(null);
 
@@ -55,20 +58,26 @@ export default function DownloadButtons({ data }: Props) {
 
   const getFilterCount = (filter: Filter) => {
     if (filter === 'All') return data.length;
-    return data.filter(row => row['Match Status'] === filter).length;
+    return data.filter((row) => row['Match Status'] === filter).length;
   };
 
   const handleDownload = async (filter: Filter) => {
     setIsDownloading(filter);
-    
+
     try {
       // Add a small delay for UX (shows loading state)
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
       const filteredData =
         filter === 'All'
           ? data
-          : data.filter(row => row['Match Status'] === filter);
+          : data.filter((row) => row['Match Status'] === filter);
+      
+      if (filteredData.length === 0) {
+        // Prevent download if there's no data for the filter
+        setIsDownloading(null);
+        return;
+      }
 
       const worksheet = XLSX.utils.json_to_sheet(filteredData);
       const workbook = XLSX.utils.book_new();
@@ -79,16 +88,29 @@ export default function DownloadButtons({ data }: Props) {
           ? XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
           : XLSX.write(workbook, { bookType: 'csv', type: 'array' });
 
-      const timestamp = new Date().toISOString().split('T')[0];
-      const fileName = `OptiMatch_${filter.replace(' ', '_')}_${timestamp}.${fileType}`;
+      // --- 3. DYNAMIC FILENAME LOGIC ---
+      // Use original filename if available, otherwise fallback to a default
+      const baseName = originalFileName
+        ? originalFileName.replace(/\.[^/.]+$/, '')
+        : 'Validation_Results';
+      
+      // Get a clean timestamp in YYYY-MM-DD format
+      const timestamp = new Date().toLocaleDateString('en-CA');
+      const marker = filter.replace(' ', '_'); // e.g., "Partial_Match"
+
+      const fileName = `${baseName}_Validated_${marker}_${timestamp}.${fileType}`;
+      
       const blob = new Blob([fileBuffer], {
         type:
           fileType === 'xlsx'
             ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            : 'text/csv;charset=utf-8'
+            : 'text/csv;charset=utf-8',
       });
 
       saveAs(blob, fileName);
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Optionally, add a user notification for the error
     } finally {
       setIsDownloading(null);
     }
@@ -98,7 +120,7 @@ export default function DownloadButtons({ data }: Props) {
     return new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
     });
   };
 
@@ -120,7 +142,7 @@ export default function DownloadButtons({ data }: Props) {
             Generated on {getCurrentDate()}
           </p>
         </div>
-        
+
         {/* File Type Selector */}
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
           <div className="flex items-center gap-3 mb-3">
@@ -159,7 +181,7 @@ export default function DownloadButtons({ data }: Props) {
         {filters.map((filter) => {
           const count = getFilterCount(filter);
           const isLoading = isDownloading === filter;
-          
+
           return (
             <div
               key={filter}

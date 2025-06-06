@@ -9,6 +9,8 @@ type ResultRow = {
 
 type Props = {
   data: ResultRow[];
+  headers?: string[];
+  responseHeaders?: string[]; // Headers from API response
 };
 
 type SortConfig = {
@@ -16,14 +18,36 @@ type SortConfig = {
   direction: 'asc' | 'desc';
 } | null;
 
-export default function ResultTable({ data }: Props) {
+export default function ResultTable({ data, headers, responseHeaders }: Props) {
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
   const [filterText, setFilterText] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
   if (data.length === 0) return null;
 
-  const headers = Object.keys(data[0]);
+  // Header detection - prioritize responseHeaders if available, then props.headers, then data keys
+  const tableHeaders = useMemo(() => {
+    if (responseHeaders && responseHeaders.length > 0) {
+      return responseHeaders;
+    }
+    
+    if (headers && headers.length > 0) {
+      // Verify that headers actually exist in the data
+      const firstRowKeys = Object.keys(data[0]);
+      const validHeaders = headers.filter(header => firstRowKeys.includes(header));
+      
+      // If no valid headers found, fall back to data keys
+      return validHeaders.length > 0 ? validHeaders : firstRowKeys;
+    }
+    
+    return Object.keys(data[0]);
+  }, [headers, data, responseHeaders]);
+
+  // Find the status column (could be named differently)
+  const statusColumn = useMemo(() => {
+    const possibleStatusColumns = ['status', 'Status', 'Match Status', 'matchStatus', 'validation_status'];
+    return possibleStatusColumns.find(col => tableHeaders.includes(col)) || null;
+  }, [tableHeaders]);
 
   // Filtering logic
   const filteredData = useMemo(() => {
@@ -34,11 +58,11 @@ export default function ResultTable({ data }: Props) {
         );
       
       const matchesStatus = statusFilter === 'all' || 
-        row['Match Status'] === statusFilter;
+        (statusColumn && row[statusColumn] === statusFilter);
       
       return matchesText && matchesStatus;
     });
-  }, [data, filterText, statusFilter]);
+  }, [data, filterText, statusFilter, statusColumn]);
 
   // Sorting logic
   const sortedData = useMemo(() => {
@@ -108,7 +132,9 @@ export default function ResultTable({ data }: Props) {
   };
 
   // Get unique statuses for filter dropdown
-  const uniqueStatuses = [...new Set(data.map(row => row['Match Status']))];
+  const uniqueStatuses = statusColumn 
+    ? [...new Set(data.map(row => row[statusColumn]))]
+    : [];
 
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
@@ -138,20 +164,22 @@ export default function ResultTable({ data }: Props) {
               />
             </div>
             
-            {/* Status Filter */}
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="pl-10 pr-8 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 text-sm appearance-none bg-white"
-              >
-                <option value="all">All Statuses</option>
-                {uniqueStatuses.map(status => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-            </div>
+            {/* Status Filter - only show if status column exists */}
+            {statusColumn && (
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="pl-10 pr-8 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 text-sm appearance-none bg-white"
+                >
+                  <option value="all">All Statuses</option>
+                  {uniqueStatuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -161,7 +189,7 @@ export default function ResultTable({ data }: Props) {
         <table className="min-w-full">
           <thead className="bg-gradient-to-r from-slate-100 to-slate-200 sticky top-0 z-10">
             <tr>
-              {headers.map((header) => (
+              {tableHeaders.map((header) => (
                 <th
                   key={header}
                   onClick={() => handleSort(header)}
@@ -194,11 +222,11 @@ export default function ResultTable({ data }: Props) {
             {sortedData.map((row, i) => (
               <tr 
                 key={i} 
-                className={`${getRowClass(row['Match Status'])} transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5`}
+                className={`${getRowClass(statusColumn ? row[statusColumn] : '')} transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5`}
               >
-                {headers.map((key) => (
+                {tableHeaders.map((key) => (
                   <td key={key} className="px-6 py-4 whitespace-nowrap text-sm">
-                    {key === 'Match Status' ? (
+                    {key === statusColumn ? (
                       <div className="flex items-center gap-2">
                         {getStatusIcon(row[key])}
                         <span className={getStatusBadge(row[key])}>
@@ -207,7 +235,7 @@ export default function ResultTable({ data }: Props) {
                       </div>
                     ) : (
                       <span className="text-slate-900 font-medium">
-                        {row[key]}
+                        {row[key] !== undefined ? String(row[key]) : '-'}
                       </span>
                     )}
                   </td>
@@ -232,26 +260,28 @@ export default function ResultTable({ data }: Props) {
       {/* Footer with Summary */}
       <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-6 py-4 border-t border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-4 text-sm">
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-emerald-400 rounded-full"></div>
-              <span className="text-slate-600">
-                Valid: {data.filter(row => row['Match Status'] === 'Valid').length}
-              </span>
+          {statusColumn && (
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-emerald-400 rounded-full"></div>
+                <span className="text-slate-600">
+                  Valid: {data.filter(row => row[statusColumn] === 'Valid').length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-amber-400 rounded-full"></div>
+                <span className="text-slate-600">
+                  Partial: {data.filter(row => row[statusColumn] === 'Partial Match').length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-red-400 rounded-full"></div>
+                <span className="text-slate-600">
+                  Invalid: {data.filter(row => row[statusColumn] === 'Invalid').length}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-amber-400 rounded-full"></div>
-              <span className="text-slate-600">
-                Partial: {data.filter(row => row['Match Status'] === 'Partial Match').length}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-red-400 rounded-full"></div>
-              <span className="text-slate-600">
-                Invalid: {data.filter(row => row['Match Status'] === 'Invalid').length}
-              </span>
-            </div>
-          </div>
+          )}
           <div className="text-slate-500">
             Total Records: {data.length}
           </div>

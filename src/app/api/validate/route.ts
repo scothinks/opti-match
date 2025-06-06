@@ -44,62 +44,135 @@ function validateEntry(entry: unknown, context: string): entry is Entry {
   return true;
 }
 
-// Helper to detect if a row is likely headers
+// Improved header detection - look for meaningful text patterns
 function isLikelyHeaderRow(row: Record<string, unknown>): boolean {
-  const values = Object.values(row).map(String);
-  const headerKeywords = ['name', 'id', 'ssid', 'nin', 'account', 'bank', 'no', 'number'];
+  const values = Object.values(row).map(String).map(v => v.toLowerCase());
+  
+  // Check for common header patterns
+  const headerPatterns = [
+    /^(ssid|nin|id|number|no\.?|ref|reference)$/,
+    /^(name|full.?name|beneficiary|customer|person)$/,
+    /^(status|state|condition|result)$/,
+    /^(bank|account|acct|institution)$/,
+    /^(date|time|created|updated|modified)$/,
+    /^(column|field|data|info|details)$/
+  ];
 
-  return values.some(value =>
-    headerKeywords.some(keyword =>
-      value.toLowerCase().includes(keyword)
-    )
+  const hasHeaderPattern = values.some(value => 
+    headerPatterns.some(pattern => pattern.test(value))
   );
+
+  const hasTextContent = values.some(value => 
+    value.length > 0 && 
+    isNaN(Number(value)) && 
+    !/^\d+$/.test(value) &&
+    value !== 'null' &&
+    value !== 'undefined'
+  );
+
+  const hasReasonableLength = values.some(value => 
+    value.length >= 2 && value.length <= 50
+  );
+
+  return hasHeaderPattern || (hasTextContent && hasReasonableLength);
 }
 
-// Find the first row that looks like headers in a dataset
+// Enhanced header detection with better logic
 function findHeaderRow(rows: Entry[]): number {
-  for (let i = 0; i < Math.min(5, rows.length); i++) { // Check first 5 rows max
+  if (rows.length === 0) return 0;
+
+  if (isLikelyHeaderRow(rows[0])) {
+    return 0;
+  }
+
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
     if (isLikelyHeaderRow(rows[i])) {
       return i;
     }
   }
-  return 0; // Default to first row if no headers found
+
+  if (rows.length > 1) {
+    const firstRowValues = Object.values(rows[0]).map(String);
+    const secondRowValues = Object.values(rows[1]).map(String);
+    
+    const firstRowHasText = firstRowValues.some(v => 
+      v.length > 0 && isNaN(Number(v)) && !/^\d+$/.test(v)
+    );
+    const secondRowHasMoreNumbers = secondRowValues.filter(v => 
+      !isNaN(Number(v)) || /^\d+$/.test(v)
+    ).length > firstRowValues.filter(v => 
+      !isNaN(Number(v)) || /^\d+$/.test(v)
+    ).length;
+
+    if (firstRowHasText && secondRowHasMoreNumbers) {
+      return 0;
+    }
+  }
+
+  return 0;
 }
 
-// Enhanced field extractor with optional header row detection
+// Enhanced field extraction with better column mapping
 function extractField(entry: Entry, possibleFieldNames: string[], headerRow?: Entry): string {
   const normalizeKey = (str: string) =>
     str
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
+      .replace(/^_+|_+$/g, '')
       .replace('fullname', 'name')
+      .replace('beneficiaryname', 'name')
+      .replace('customername', 'name')
+      .replace('personname', 'name')
       .replace('nin', 'nationalid')
-      .replace('ssid', 'socialsecurity');
+      .replace('ssid', 'socialsecurity')
+      .replace('socialsecurityid', 'socialsecurity')
+      .replace('ssn', 'socialsecurity');
 
-  // If we have a header row, use it to build a field mapping
   if (headerRow) {
     const fieldMap: Record<string, string> = {};
+    
     for (const [key, value] of Object.entries(headerRow)) {
-      const normalizedValue = normalizeKey(String(value));
-      fieldMap[normalizedValue] = key; // Map normalized header to original key
+      if (value !== null && value !== undefined) {
+        const normalizedValue = normalizeKey(String(value));
+        if (normalizedValue) {
+          fieldMap[normalizedValue] = key;
+        }
+      }
     }
 
     for (const field of possibleFieldNames) {
       const normalizedField = normalizeKey(field);
       if (fieldMap[normalizedField]) {
         const value = entry[fieldMap[normalizedField]];
-        return value !== null && value !== undefined ? normalize(value) : '';
+        if (value !== null && value !== undefined) {
+          const stringValue = String(value).trim();
+          if (stringValue) {
+            return normalize(stringValue);
+          }
+        }
       }
     }
   }
 
-  // Fallback to original behavior if no header row or no match
   for (const field of possibleFieldNames) {
-    const value = entry[field];
-    if (value !== null && value !== undefined && String(value).trim()) {
-      return normalize(value);
+    if (entry[field] !== undefined && entry[field] !== null) {
+      const stringValue = String(entry[field]).trim();
+      if (stringValue) {
+        return normalize(stringValue);
+      }
+    }
+
+    const normalizedField = normalizeKey(field);
+    for (const [key, value] of Object.entries(entry)) {
+      if (normalizeKey(key) === normalizedField && value !== null && value !== undefined) {
+        const stringValue = String(value).trim();
+        if (stringValue) {
+          return normalize(stringValue);
+        }
+      }
     }
   }
+
   return '';
 }
 
@@ -115,7 +188,7 @@ function safeStringExtract(entry: Entry, fieldNames: string[]): string {
   return '';
 }
 
-// Validate request payload structure and detect header rows
+// Enhanced request payload validation
 function validateRequestPayload(body: unknown): {
   source: Entry[];
   entries: Entry[];
@@ -152,22 +225,32 @@ function validateRequestPayload(body: unknown): {
     }
   });
 
-  // Detect header rows
   const sourceRows = payload.source as Entry[];
   const entryRows = payload.entries as Entry[];
 
   const sourceHeaderRowIndex = findHeaderRow(sourceRows);
   const entriesHeaderRowIndex = findHeaderRow(entryRows);
 
+  const sourceDataRows = sourceRows.slice(sourceHeaderRowIndex + 1);
+  const entryDataRows = entryRows.slice(entriesHeaderRowIndex + 1);
+
+  if (sourceDataRows.length === 0) {
+    throw new Error('No data rows found in source after header detection');
+  }
+
+  if (entryDataRows.length === 0) {
+    throw new Error('No data rows found in entries after header detection');
+  }
+
   return {
-    source: sourceRows.slice(sourceHeaderRowIndex + 1),
-    entries: entryRows.slice(entriesHeaderRowIndex + 1),
+    source: sourceDataRows,
+    entries: entryDataRows,
     sourceHeaderRow: sourceRows[sourceHeaderRowIndex],
     entriesHeaderRow: entryRows[entriesHeaderRowIndex]
   };
 }
 
-// Enhanced matching logic with flexible field extraction and header-awareness
+// Enhanced matching logic with better field detection
 function getMatchStatus(
   entry: Entry,
   source: Entry[],
@@ -175,26 +258,33 @@ function getMatchStatus(
   entryHeaderRow?: Entry
 ): ValidationResult {
   try {
-    // Debug: Log detected headers for first entry (development only)
-    if (process.env.NODE_ENV === 'development' && source.length > 0) {
-      console.log('Detected source headers:', Object.keys(sourceHeaderRow || {}));
-      console.log('Detected entry headers:', Object.keys(entryHeaderRow || {}));
-    }
-
-    // Extract fields using header-aware extraction
-    const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], entryHeaderRow);
-    const entryNIN = extractField(entry, ['NIN', 'nin', 'Nin', 'NationalID', 'National ID'], entryHeaderRow);
+    const entrySSID = extractField(
+      entry, 
+      ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN', 'Social Security Number', 'Social Security ID', '__EMPTY_1', '__EMPTY_2', '__EMPTY_3', '__EMPTY_4', '__EMPTY_5', '__EMPTY_6'], 
+      entryHeaderRow
+    );
+    
+    const entryNIN = extractField(
+      entry, 
+      ['NIN', 'nin', 'Nin', 'NationalID', 'National ID', 'National Identification Number', '__EMPTY_1', '__EMPTY_2', '__EMPTY_3', '__EMPTY_4', '__EMPTY_5', '__EMPTY_6'], 
+      entryHeaderRow
+    );
+    
     const entryName = extractField(
       entry,
-      ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name'],
+      ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name', '__EMPTY_2', '__EMPTY_3'],
       entryHeaderRow
     );
 
-    // Validate required fields
     if (!entryName) {
+      const availableFields = Object.entries(entry)
+        .filter(([key, value]) => value !== null && value !== undefined && String(value).trim())
+        .map(([key, value]) => `${key}: "${value}"`)
+        .join(', ');
+      
       return {
         status: 'Invalid',
-        reason: `Missing name field. Detected fields: ${Object.keys(entry).join(', ')}`
+        reason: `Missing name field. Available fields: ${availableFields}`
       };
     }
 
@@ -205,7 +295,6 @@ function getMatchStatus(
       };
     }
 
-    // Search for potential matches
     const potentialMatches = source.filter(src => {
       const srcSSID = extractField(src, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
       const srcNIN = extractField(src, ['NIN', 'nin', 'Nin', 'NationalID', 'National ID'], sourceHeaderRow);
@@ -234,7 +323,6 @@ function getMatchStatus(
       };
     }
 
-    // Find best match with scoring
     let bestMatch = potentialMatches[0];
     let bestScore = 0;
 
@@ -254,7 +342,6 @@ function getMatchStatus(
       }
     }
 
-    // Validate match quality
     const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
     const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
     const srcName = extractField(bestMatch, ['FULL NAME', 'Full Name', 'name', 'Name'], sourceHeaderRow);
@@ -290,7 +377,6 @@ function getMatchStatus(
       };
     }
 
-    // Build mismatch reasons
     const mismatches: string[] = [];
     if (!ssidMatches) {
       if (entrySSID && srcSSID) mismatches.push(`SSID mismatch: "${entrySSID}" vs "${srcSSID}"`);
@@ -305,7 +391,7 @@ function getMatchStatus(
     }
 
     if (!nameMatches) {
-      mismatches.push(`Name similarity: ${nameSimilarity}%`);
+      mismatches.push(`Name similarity: ${nameSimilarity}% (${entryName} vs ${srcName})`);
     }
 
     return {
@@ -345,6 +431,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       sourceHeaderRow?: Entry;
       entriesHeaderRow?: Entry;
     };
+    
     try {
       validatedPayload = validateRequestPayload(requestBody);
     } catch (error) {
@@ -358,11 +445,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const results: ProcessedEntry[] = [];
     const processingErrors: Array<{ index: number; error: string }> = [];
 
+    // Process each entry
     for (let i = 0; i < entries.length; i++) {
       try {
         const matchResult = getMatchStatus(entries[i], source, sourceHeaderRow, entriesHeaderRow);
         results.push({
-          ...entries[i],
+          ...entries[i], // Preserve all original fields
           'Match Status': matchResult.status,
           'Match Reason': matchResult.reason,
           'Matched Name': matchResult.matchedName || '',
@@ -373,7 +461,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         processingErrors.push({ index: i, error: errorMessage });
         results.push({
-          ...entries[i],
+          ...entries[i], // Preserve all original fields
           'Match Status': 'Invalid',
           'Match Reason': `Processing error: ${errorMessage}`,
           'Matched Name': '',
@@ -383,8 +471,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // Build response with proper headers
+    const responseHeaders = entriesHeaderRow 
+      ? Object.keys(entriesHeaderRow).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN'])
+      : (entries[0] ? Object.keys(entries[0]).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) 
+         : ['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']);
+
     const response = {
-      results,
+      headers: responseHeaders,
+      results: entries.map((entry, i) => ({
+        ...entry, // Preserve all original fields
+        'Match Status': results[i]['Match Status'],
+        'Match Reason': results[i]['Match Reason'],
+        'Matched Name': results[i]['Matched Name'] || '',
+        'Correct SSID': results[i]['Correct SSID'] || '',
+        'Correct NIN': results[i]['Correct NIN'] || ''
+      })),
       summary: {
         total: results.length,
         valid: results.filter(r => r['Match Status'] === 'Valid').length,
@@ -392,7 +494,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         partialMatch: results.filter(r => r['Match Status'] === 'Partial Match').length,
         processingErrors: processingErrors.length
       },
-      ...(processingErrors.length > 0 && { processingErrors })
+      ...(processingErrors.length > 0 && { processingErrors }),
+      debug: process.env.NODE_ENV === 'development' ? {
+        sourceHeaderDetected: sourceHeaderRow ? Object.keys(sourceHeaderRow) : 'None',
+        entriesHeaderDetected: entriesHeaderRow ? Object.keys(entriesHeaderRow) : 'None',
+        sourceDataRows: source.length,
+        entryDataRows: entries.length
+      } : undefined
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -412,22 +520,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
 // Other HTTP methods
 export async function GET() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
 }
 
 export async function PUT() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
 }
 
 export async function DELETE() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
 }
