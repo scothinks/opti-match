@@ -360,11 +360,13 @@ export default function Home() {
                   <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Database className="w-6 h-6 text-blue-600" />
                   </div>
-                  <div className="min-w-0 flex-1 overflow-hidden">
+                  <div className="min-w-0 flex-1">
                     <h4 className="font-semibold text-slate-800 mb-1">Source File</h4>
-                    <p className="text-sm text-slate-600 truncate" title={sourceFile?.name}>
-                      {sourceFile?.name}
-                    </p>
+                    <div className="w-full overflow-hidden">
+                      <p className="text-sm text-slate-600 truncate" title={sourceFile?.name}>
+                        {sourceFile?.name}
+                      </p>
+                    </div>
                     <p className="text-xs text-slate-500 mt-1">
                       {sourceFile?.size ? (sourceFile.size / 1024 / 1024).toFixed(2) : '0'} MB
                     </p>
@@ -376,11 +378,13 @@ export default function Home() {
                   <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Target className="w-6 h-6 text-amber-600" />
                   </div>
-                  <div className="min-w-0 flex-1 overflow-hidden">
+                  <div className="min-w-0 flex-1">
                     <h4 className="font-semibold text-slate-800 mb-1">Validation File</h4>
-                    <p className="text-sm text-slate-600 truncate" title={toValidateFile?.name}>
-                      {toValidateFile?.name}
-                    </p>
+                    <div className="w-full overflow-hidden">
+                      <p className="text-sm text-slate-600 truncate" title={toValidateFile?.name}>
+                        {toValidateFile?.name}
+                      </p>
+                    </div>
                     <p className="text-xs text-slate-500 mt-1">
                       {toValidateFile?.size ? (toValidateFile.size / 1024 / 1024).toFixed(2) : '0'} MB
                     </p>
