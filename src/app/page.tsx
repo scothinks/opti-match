@@ -70,17 +70,26 @@ export default function Home() {
 
   const steps = ['Upload Files', 'Configure', 'Validate', 'Results'];
 
-  // Auto-advance steps based on file uploads
+  // ** MODIFIED useEffect TO PREVENT CONFLICT **
+  // This effect now only triggers when the files themselves are selected or cleared.
   useEffect(() => {
-    if (!sourceFile && !toValidateFile) {
-      setCurrentStep(0);
-    } else if (sourceFile && toValidateFile && !showPreview) {
-      setCurrentStep(1);
+    if (sourceFile && toValidateFile) {
       setShowPreview(true);
-    } else if (results.length > 0) {
+      setCurrentStep(1);
+    } else {
+      // This ensures that if a file is removed, we go back to the upload step.
+      setShowPreview(false);
+      setCurrentStep(0);
+    }
+  }, [sourceFile, toValidateFile]);
+
+  // This separate effect handles advancing to the results step.
+  useEffect(() => {
+    if (results.length > 0) {
       setCurrentStep(3);
     }
-  }, [sourceFile, toValidateFile, results, showPreview]);
+  }, [results]);
+
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage(message);
@@ -177,9 +186,7 @@ export default function Home() {
       setValidationStats(calculateStats(result.results));
       setProcessingTime(parseFloat(duration));
       setStatus('');
-      setCurrentStep(3);
-
-      showNotification(`Validation completed in ${duration}s! Found ${result.results.length} entries.`, 'success');
+      // The results useEffect will now handle setting the step to 3
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       showNotification(`Validation failed: ${errorMessage}`, 'error');
@@ -197,14 +204,15 @@ export default function Home() {
     setToValidateFile(null);
     setDetectedHeaders([]);
     setStatus('');
-    setCurrentStep(0);
-    setShowPreview(false);
+    // The file useEffect will handle resetting the step to 0
+    setShowPreview(false); // Explicitly set here for clarity
     setValidationStats(null);
     setProcessingTime(0);
     showNotification('Session cleared - ready for new validation', 'info');
   };
 
   const handleEditFiles = () => {
+    // This function now works because the main useEffect no longer fights it
     setShowPreview(false);
     setCurrentStep(0);
   };
@@ -355,7 +363,6 @@ export default function Home() {
               </div>
 
               <div className="grid md:grid-cols-2 gap-6 mb-8">
-                {/* Source File Card */}
                 <div className="flex items-start space-x-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-100 overflow-hidden">
                   <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Database className="w-6 h-6 text-blue-600" />
@@ -371,7 +378,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Validation File Card */}
                 <div className="flex items-start space-x-4 p-4 bg-amber-50/50 rounded-2xl border border-amber-100 overflow-hidden">
                   <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
                     <Target className="w-6 h-6 text-amber-600" />

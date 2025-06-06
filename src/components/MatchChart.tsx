@@ -39,9 +39,9 @@ export default function MatchChart({ data }: Props) {
       counts,
       total,
       percentages: {
-        Valid: total > 0 ? Math.round((counts.Valid / total) * 100) : 0,
-        'Partial Match': total > 0 ? Math.round((counts['Partial Match'] / total) * 100) : 0,
-        Invalid: total > 0 ? Math.round((counts.Invalid / total) * 100) : 0
+        Valid: total > 0 ? ((counts.Valid / total) * 100).toFixed(2) : '0.00',
+        'Partial Match': total > 0 ? ((counts['Partial Match'] / total) * 100).toFixed(2) : '0.00',
+        Invalid: total > 0 ? ((counts.Invalid / total) * 100).toFixed(2) : '0.00'
       }
     };
   }, [data]);
@@ -224,7 +224,7 @@ export default function MatchChart({ data }: Props) {
               </div>
               <div className="text-right">
                 <div className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  {stats.total > 0 ? Math.round(((stats.counts.Valid + stats.counts['Partial Match']) / stats.total) * 100) : 0}%
+                  {stats.total > 0 ? (((stats.counts.Valid + stats.counts['Partial Match']) / stats.total) * 100).toFixed(2) : '0.00'}%
                 </div>
               </div>
             </div>
