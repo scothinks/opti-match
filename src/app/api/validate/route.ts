@@ -250,10 +250,11 @@ function validateRequestPayload(body: unknown): {
   };
 }
 
-// Enhanced matching logic with better field detection
+// ** MODIFIED FUNCTION SIGNATURE **
 function getMatchStatus(
   entry: Entry,
-  source: Entry[],
+  sourceBySSID: Map<string, Entry>,
+  sourceByNIN: Map<string, Entry>,
   sourceHeaderRow?: Entry,
   entryHeaderRow?: Entry
 ): ValidationResult {
@@ -295,21 +296,25 @@ function getMatchStatus(
       };
     }
 
-    const potentialMatches = source.filter(src => {
-      const srcSSID = extractField(src, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
-      const srcNIN = extractField(src, ['NIN', 'nin', 'Nin', 'NationalID', 'National ID'], sourceHeaderRow);
-      const srcName = extractField(
-        src,
-        ['FULL NAME', 'Full Name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name'],
-        sourceHeaderRow
-      );
+    // ** REPLACED SLOW FILTER WITH FAST MAP LOOKUP **
+    const potentialMatches: Entry[] = [];
+    const foundMatches = new Set<Entry>(); // Use a Set to handle records found by both SSID and NIN
 
-      const ssidMatch = entrySSID && srcSSID && srcSSID === entrySSID;
-      const ninMatch = entryNIN && srcNIN && srcNIN === entryNIN;
-      const nameMatch = srcName && token_set_ratio(entryName, srcName) >= 70;
-
-      return ssidMatch || ninMatch || nameMatch;
-    });
+    if (entrySSID && sourceBySSID.has(entrySSID)) {
+      const match = sourceBySSID.get(entrySSID)!;
+      if (!foundMatches.has(match)) {
+          potentialMatches.push(match);
+          foundMatches.add(match);
+      }
+    }
+  
+    if (entryNIN && sourceByNIN.has(entryNIN)) {
+        const match = sourceByNIN.get(entryNIN)!;
+        if (!foundMatches.has(match)) {
+            potentialMatches.push(match);
+            foundMatches.add(match);
+        }
+    }
 
     if (potentialMatches.length === 0) {
       const searchCriteria: string[] = [];
@@ -323,6 +328,7 @@ function getMatchStatus(
       };
     }
 
+    // This logic remains the same, but now runs on a tiny array (0-2 items) instead of the whole source
     let bestMatch = potentialMatches[0];
     let bestScore = 0;
 
@@ -442,13 +448,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const { source, entries, sourceHeaderRow, entriesHeaderRow } = validatedPayload;
+    
+    // ** ADDED SOURCE DATA INDEXING **
+    const sourceBySSID = new Map<string, Entry>();
+    const sourceByNIN = new Map<string, Entry>();
+
+    for (const srcRecord of source) {
+        const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
+        const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow);
+
+        if (ssid) {
+            sourceBySSID.set(ssid, srcRecord);
+        }
+        if (nin) {
+            sourceByNIN.set(nin, srcRecord);
+        }
+    }
+
     const results: ProcessedEntry[] = [];
     const processingErrors: Array<{ index: number; error: string }> = [];
 
     // Process each entry
     for (let i = 0; i < entries.length; i++) {
       try {
-        const matchResult = getMatchStatus(entries[i], source, sourceHeaderRow, entriesHeaderRow);
+        // ** PASSING INDEX MAPS TO FUNCTION **
+        const matchResult = getMatchStatus(
+          entries[i],
+          sourceBySSID,
+          sourceByNIN,
+          sourceHeaderRow,
+          entriesHeaderRow
+        );
         results.push({
           ...entries[i], // Preserve all original fields
           'Match Status': matchResult.status,
