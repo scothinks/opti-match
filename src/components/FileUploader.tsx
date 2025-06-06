@@ -99,12 +99,10 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
           bg-gradient-to-br from-indigo-500/5 to-purple-500/5
         `} />
 
-        {/* --- MOBILE OPTIMIZATION: Use less padding on smaller screens --- */}
         <div className="relative p-6 sm:p-8">
           {!file ? (
             <div className="text-center">
               {/* Upload Icon */}
-              {/* --- MOBILE OPTIMIZATION: Make icon slightly smaller on mobile --- */}
               <div className={`
                 w-14 h-14 sm:w-16 sm:h-16 mx-auto mb-4 rounded-full flex items-center justify-center transition-all duration-300
                 ${isDragOver 
@@ -141,19 +139,20 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
               <div className="absolute bottom-4 left-4 w-3 h-3 bg-purple-200 rounded-full opacity-40" />
             </div>
           ) : (
-            // --- MOBILE OPTIMIZATION: Reduce gap and icon size for a compact view ---
             <div className="flex items-center gap-3 sm:gap-4">
               {/* File Icon */}
               <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
                 <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
 
+              {/* --- THIS IS THE CORRECTED SECTION --- */}
               {/* File Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                  <p className="font-semibold text-slate-700 truncate">{file.name}</p>
-                </div>
+                {/* We simplified the structure here by removing a nested flexbox */}
+                <p className="font-semibold text-slate-700 truncate">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 inline-block mr-2 align-middle" />
+                  <span className="align-middle">{file.name}</span>
+                </p>
                 <p className="text-sm text-slate-500">{formatFileSize(file.size)}</p>
               </div>
 
