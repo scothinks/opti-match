@@ -63,7 +63,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full max-w-full box-border">
       {/* Label */}
       <div className="mb-4">
         <h3 className="text-lg font-semibold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
