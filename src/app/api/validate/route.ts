@@ -30,7 +30,6 @@ const MAX_ENTRIES_LIMIT = 20000;
 const MAX_SOURCE_LIMIT = 500000;
 
 // HELPER FUNCTIONS (normalize, isLikelyHeaderRow, findHeaderRow, extractField, etc.)
-// These remain unchanged from the previous version.
 
 function normalize(value: unknown): string {
   if (value === null || value === undefined) {
@@ -123,20 +122,6 @@ function extractFullName(entry: Entry, headerRow?: Entry): string {
   return '';
 }
 
-function safeStringExtract(entry: Entry, fieldNames: string[], headerRow?: Entry): string {
-  if (fieldNames.some(name => name.toLowerCase().includes('name'))) {
-    return extractFullName(entry, headerRow);
-  }
-  for (const fieldName of fieldNames) {
-    const value = entry[fieldName];
-    if (value !== null && value !== undefined) {
-      const stringValue = String(value).trim();
-      if (stringValue) return stringValue;
-    }
-  }
-  return '';
-}
-
 function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>, sourceHeaderRow?: Entry, entryHeaderRow?: Entry): ValidationResult {
   try {
     const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], entryHeaderRow);
@@ -182,8 +167,8 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
       }
     }
 
-    const srcSSID = extractField(bestMatch, ['SSID', 'ssid'], sourceHeaderRow);
-    const srcNIN = extractField(bestMatch, ['NIN', 'nin'], sourceHeaderRow);
+    const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
+    const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
     const srcName = extractFullName(bestMatch, sourceHeaderRow);
 
     if (!srcName) return { status: 'Invalid', reason: 'Source record missing name' };
@@ -194,7 +179,14 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     const nameMatches = nameSimilarity >= SIMILARITY_THRESHOLD;
 
     if (ssidMatches && ninMatches && nameMatches) {
-      return { status: 'Valid', reason: `Verified (${nameSimilarity}% name match)`, matchedName: srcName, matchedSSID: srcSSID, matchedNIN: srcNIN, similarity: nameSimilarity };
+      return { 
+        status: 'Valid', 
+        reason: `Verified (${nameSimilarity}% name match)`, 
+        matchedName: srcName, 
+        matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
+        matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
+        similarity: nameSimilarity 
+      };
     }
 
     const mismatches: string[] = [];
@@ -202,13 +194,19 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     if (!ninMatches) mismatches.push(`NIN mismatch`);
     if (!nameMatches) mismatches.push(`Name similarity: ${nameSimilarity}%`);
 
-    return { status: 'Partial Match', reason: `Issues: ${mismatches.join('; ')}`, matchedName: srcName, matchedSSID: srcSSID, matchedNIN: srcNIN, similarity: nameSimilarity };
+    return { 
+      status: 'Partial Match', 
+      reason: `Issues: ${mismatches.join('; ')}`, 
+      matchedName: srcName, 
+      matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
+      matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
+      similarity: nameSimilarity 
+    };
   } catch (error) {
     return { status: 'Invalid', reason: `System error: ${error instanceof Error ? error.message : 'Unknown error'}` };
   }
 }
 
-// *** NEW: Function to parse files from Vercel Blob ***
 async function parseFileFromUrl(url: string): Promise<Entry[]> {
     try {
         const response = await fetch(url);
@@ -219,7 +217,6 @@ async function parseFileFromUrl(url: string): Promise<Entry[]> {
         const workbook = XLSX.read(data);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        // The XLSX library correctly parses CSV or Excel data into a sheet object.
         return XLSX.utils.sheet_to_json(sheet);
     } catch (error) {
         console.error(`Error parsing file from URL ${url}:`, error);
@@ -227,7 +224,6 @@ async function parseFileFromUrl(url: string): Promise<Entry[]> {
     }
 }
 
-// *** REWRITTEN POST HANDLER FOR VERCEL BLOB ***
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json();
@@ -237,17 +233,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Request body must include sourceUrl and toValidateUrl strings.' }, { status: 400 });
     }
 
-    // 1. Fetch and Parse files from Blob storage in parallel
     const [sourceWithHeader, entriesWithHeader] = await Promise.all([
       parseFileFromUrl(sourceUrl),
       parseFileFromUrl(toValidateUrl),
     ]);
 
-    // 2. Validate file sizes against limits
     if (sourceWithHeader.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
     if (entriesWithHeader.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
 
-    // 3. Detect headers and separate data rows
     const sourceHeaderRowIndex = findHeaderRow(sourceWithHeader);
     const sourceHeaderRow = sourceWithHeader[sourceHeaderRowIndex];
     const source = sourceWithHeader.slice(sourceHeaderRowIndex + 1);
@@ -256,7 +249,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const entriesHeaderRow = entriesWithHeader[entriesHeaderRowIndex];
     const entries = entriesWithHeader.slice(entriesHeaderRowIndex + 1);
 
-    // 4. Index the source data (the high-performance step)
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
 
@@ -267,14 +259,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (nin) sourceByNIN.set(nin, srcRecord);
     }
 
-    // 5. Process entries against the index
     const results: ProcessedEntry[] = [];
     for (const entry of entries) {
       const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN, sourceHeaderRow, entriesHeaderRow);
       results.push({ ...entry, 'Match Status': matchResult.status, 'Match Reason': matchResult.reason, 'Matched Name': matchResult.matchedName || '', 'Correct SSID': matchResult.matchedSSID || '', 'Correct NIN': matchResult.matchedNIN || '' });
     }
 
-    // 6. Build and return the response
     const responseHeaders = entriesHeaderRow ? Object.keys(entriesHeaderRow).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : (entries[0] ? Object.keys(entries[0]).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : ['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']);
     
     const response = {
