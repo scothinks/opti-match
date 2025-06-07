@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from 'react';
 import { ChevronUp, ChevronDown, Search, Filter, CheckCircle2, AlertTriangle, XCircle, Minus } from 'lucide-react';
-// --- MOBILE OPTIMIZATION: 1. Import the hook ---
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 
 type ResultRow = {
@@ -13,6 +12,7 @@ type Props = {
   data: ResultRow[];
   headers?: string[];
   responseHeaders?: string[]; // Headers from API response
+  onApproveMatch: (index: number) => void; // New prop to handle approvals
 };
 
 type SortConfig = {
@@ -20,8 +20,7 @@ type SortConfig = {
   direction: 'asc' | 'desc';
 } | null;
 
-export default function ResultTable({ data, headers, responseHeaders }: Props) {
-  // --- MOBILE OPTIMIZATION: 2. Use the hook to detect mobile screens ---
+export default function ResultTable({ data, headers, responseHeaders, onApproveMatch }: Props) {
   const isMobile = useMediaQuery('(max-width: 768px)');
   
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
@@ -30,8 +29,6 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
 
   if (data.length === 0) return null;
 
-  // --- MOBILE OPTIMIZATION: 3. Define which columns are essential for mobile view ---
-  // You can easily customize this list to show the most important data
   const mobileHeaders = useMemo(() => [
     'FULL NAME',
     'Match Status',
@@ -39,7 +36,6 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
   ], []);
 
   const tableHeaders = useMemo(() => {
-    // First, determine the full set of headers for desktop
     let desktopHeaders: string[];
     if (responseHeaders && responseHeaders.length > 0) {
       desktopHeaders = responseHeaders;
@@ -51,9 +47,7 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
       desktopHeaders = Object.keys(data[0]);
     }
 
-    // --- MOBILE OPTIMIZATION: 4. Conditionally return a subset of headers on mobile ---
     if (isMobile) {
-      // Ensure the mobile headers exist in the full header list to avoid errors
       return desktopHeaders.filter(h => mobileHeaders.includes(h));
     }
 
@@ -65,7 +59,6 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
     return possibleStatusColumns.find(col => tableHeaders.includes(col)) || null;
   }, [tableHeaders]);
 
-  // Filtering logic remains the same
   const filteredData = useMemo(() => {
     return data.filter(row => {
       const matchesText = filterText === '' || 
@@ -80,7 +73,6 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
     });
   }, [data, filterText, statusFilter, statusColumn]);
 
-  // Sorting logic remains the same
   const sortedData = useMemo(() => {
     if (!sortConfig) return filteredData;
 
@@ -141,7 +133,7 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
 
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-      {/* Header (already responsive) */}
+      {/* Header */}
       <div className="bg-gradient-to-r from-slate-50 to-slate-100 p-4 sm:p-6 border-b border-slate-200">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -183,7 +175,6 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
       </div>
 
       {/* Table */}
-      {/* --- MOBILE OPTIMIZATION: This div will no longer scroll on mobile! --- */}
       <div className="overflow-auto max-h-[600px]">
         <table className="min-w-full">
           <thead className="bg-gradient-to-r from-slate-100 to-slate-200 sticky top-0 z-10">
@@ -203,6 +194,10 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
                   </div>
                 </th>
               ))}
+              {/* New "Actions" Header */}
+              <th className="px-4 sm:px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-300">
+                  Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -223,22 +218,34 @@ export default function ResultTable({ data, headers, responseHeaders }: Props) {
                     )}
                   </td>
                 ))}
+                {/* New "Actions" Cell with Conditional Button */}
+                <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center">
+                  {statusColumn && (row[statusColumn] === 'Partial Match' || row[statusColumn] === 'Invalid') && (
+                    <button
+                      onClick={() => onApproveMatch(i)}
+                      className="px-2 py-1 text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-md hover:bg-emerald-200 transition-colors"
+                      title="Manually approve this match"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {/* Empty State (already mobile friendly) */}
+      {/* Empty State */}
       {sortedData.length === 0 && (
         <div className="text-center py-12">
-          {/* ... */}
+          <p className="text-slate-500">No records found.</p>
         </div>
       )}
 
-      {/* Footer (already mobile friendly with flex-wrap) */}
+      {/* Footer */}
       <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 sm:px-6 py-4 border-t border-slate-200">
-        {/* ... */}
+         <p className="text-xs text-slate-500">End of results.</p>
       </div>
     </div>
   );

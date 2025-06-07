@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react'; // Import useCallback
 import { upload } from '@vercel/blob/client';
 import {
   Upload,
@@ -123,7 +123,6 @@ export default function Home() {
     };
   };
   
-  // MODIFIED to use a unique filename instead of allowing overwrites
   const handleFileSelectAndUpload = async (file: File | null, fileType: 'source' | 'validation') => {
     if (fileType === 'source') {
       setSourceFile(file);
@@ -138,7 +137,6 @@ export default function Home() {
     else setIsUploadingValidation(true);
     showNotification(`Uploading ${file.name}...`, 'info');
 
-    // Generate a unique filename to prevent overwrites
     const uniqueFileName = `${fileType}-${Date.now()}-${Math.random().toString(36).substring(7)}-${file.name}`;
 
     try {
@@ -227,6 +225,20 @@ export default function Home() {
     setProcessingTime(0);
     showNotification('Session cleared - ready for new validation', 'info');
   };
+
+  const handleApproveMatch = useCallback((indexToUpdate: number) => {
+    const updatedResults = [...results];
+    const recordToUpdate = updatedResults[indexToUpdate];
+
+    if (recordToUpdate) {
+      recordToUpdate['Match Status'] = 'Valid';
+      recordToUpdate['Match Reason'] = 'Manually Approved by User';
+      
+      setResults(updatedResults);
+      setValidationStats(calculateStats(updatedResults));
+      showNotification('Match has been manually approved.', 'success');
+    }
+  }, [results]); // Dependency array includes 'results'
 
   const handleEditFiles = () => {
     setShowPreview(false);
@@ -329,7 +341,13 @@ export default function Home() {
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6"><div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><div className="flex items-center gap-4"><div className="flex items-center gap-2 text-sm text-slate-600"><Clock className="w-4 h-4" /><span>Processed in {processingTime}s</span></div><div className="flex items-center gap-2 text-sm text-emerald-600"><CheckCircle className="w-4 h-4" /><span>Validation Complete</span></div></div><div className="flex items-center gap-3"><button onClick={handleReset} className="text-red-500 hover:text-red-600 font-medium hover:underline transition-all duration-200 flex items-center gap-2"><RefreshCw className="w-4 h-4" />New Validation</button></div></div></div>
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6"><div className="flex items-center gap-3 mb-6"><BarChart3 className="w-6 h-6 text-indigo-600" /><h3 className="text-xl font-semibold text-slate-800">Match Distribution</h3></div><MatchChart data={results} /></div>
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6"><div className="flex items-center gap-3 mb-4"><Download className="w-6 h-6 text-indigo-600" /><h3 className="text-xl font-semibold text-slate-800">Export Results</h3></div><DownloadButtons data={results}  originalFileName={toValidateFile?.name}/></div>
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6"><div className="flex items-center gap-3 mb-6"><FileText className="w-6 h-6 text-indigo-600" /><h3 className="text-xl font-semibold text-slate-800">Detailed Results</h3></div><ResultTable data={results} responseHeaders={detectedHeaders} /></div>
+            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200 p-6"><div className="flex items-center gap-3 mb-6"><FileText className="w-6 h-6 text-indigo-600" /><h3 className="text-xl font-semibold text-slate-800">Detailed Results</h3></div>
+            <ResultTable 
+              data={results} 
+              responseHeaders={detectedHeaders}
+              onApproveMatch={handleApproveMatch} 
+            />
+            </div>
           </div>
         )}
         {/* Empty State */}
