@@ -123,7 +123,7 @@ export default function Home() {
     };
   };
   
-  // REWRITTEN to use client-side direct upload
+  // MODIFIED to use a unique filename instead of allowing overwrites
   const handleFileSelectAndUpload = async (file: File | null, fileType: 'source' | 'validation') => {
     if (fileType === 'source') {
       setSourceFile(file);
@@ -138,12 +138,14 @@ export default function Home() {
     else setIsUploadingValidation(true);
     showNotification(`Uploading ${file.name}...`, 'info');
 
+    // Generate a unique filename to prevent overwrites
+    const uniqueFileName = `<span class="math-inline">\{fileType\}\-</span>{Date.now()}-<span class="math-inline">\{Math\.random\(\)\.toString\(36\)\.substring\(7\)\}\-</span>{file.name}`;
+
     try {
-      const newBlob = await upload(file.name, file, {
+      const newBlob = await upload(uniqueFileName, file, {
         access: 'public',
         handleUploadUrl: '/api/upload',
-        allowOverwrite: true,
-      } as any); // <-- The fix is applied here
+      });
 
       if (fileType === 'source') {
         setSourceFileUrl(newBlob.url);
