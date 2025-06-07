@@ -139,7 +139,7 @@ export default function Home() {
     showNotification(`Uploading ${file.name}...`, 'info');
 
     // Generate a unique filename to prevent overwrites
-    const uniqueFileName = `<span class="math-inline">\{fileType\}\-</span>{Date.now()}-<span class="math-inline">\{Math\.random\(\)\.toString\(36\)\.substring\(7\)\}\-</span>{file.name}`;
+    const uniqueFileName = `${fileType}-${Date.now()}-${Math.random().toString(36).substring(7)}-${file.name}`;
 
     try {
       const newBlob = await upload(uniqueFileName, file, {
