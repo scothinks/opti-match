@@ -25,12 +25,13 @@ type ProcessedEntry = Entry & {
 };
 
 // Configuration constants
-const SIMILARITY_THRESHOLD = 90;
+const SIMILARITY_THRESHOLD_VALID = 90;
+const SIMILARITY_THRESHOLD_PARTIAL = 50; // New threshold for partial matches
 const MAX_ENTRIES_LIMIT = 20000;
 const MAX_SOURCE_LIMIT = 500000;
 
-// HELPER FUNCTIONS (normalize, isLikelyHeaderRow, findHeaderRow, extractField, etc.)
-
+// HELPER FUNCTIONS (normalize, isLikelyHeaderRow, findHeaderRow, etc.)
+// These functions remain unchanged.
 function normalize(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -122,86 +123,72 @@ function extractFullName(entry: Entry, headerRow?: Entry): string {
   return '';
 }
 
-function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>, sourceHeaderRow?: Entry, entryHeaderRow?: Entry): ValidationResult {
+// *** REWRITTEN VALIDATION LOGIC ***
+function getMatchStatus(
+  entry: Entry,
+  sourceBySSID: Map<string, Entry>,
+  sourceHeaderRow?: Entry,
+  entryHeaderRow?: Entry
+): ValidationResult {
   try {
     const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], entryHeaderRow);
-    const entryNIN = extractField(entry, ['NIN', 'nin', 'Nin', 'NationalID'], entryHeaderRow);
     const entryName = extractFullName(entry, entryHeaderRow);
 
+    if (!entrySSID) return { status: 'Invalid', reason: 'Missing SSID in entry file.' };
     if (!entryName) return { status: 'Invalid', reason: `Missing name field.` };
-    if (!entrySSID && !entryNIN) return { status: 'Invalid', reason: 'Missing both SSID and NIN' };
 
-    const potentialMatches: Entry[] = [];
-    const foundMatches = new Set<Entry>();
+    const sourceRecord = sourceBySSID.get(entrySSID);
 
-    if (entrySSID && sourceBySSID.has(entrySSID)) {
-      const match = sourceBySSID.get(entrySSID)!;
-      if (!foundMatches.has(match)) {
-        potentialMatches.push(match);
-        foundMatches.add(match);
-      }
-    }
-    if (entryNIN && sourceByNIN.has(entryNIN)) {
-      const match = sourceByNIN.get(entryNIN)!;
-      if (!foundMatches.has(match)) {
-        potentialMatches.push(match);
-        foundMatches.add(match);
-      }
+    // If SSID does not exist in source, it's immediately invalid.
+    if (!sourceRecord) {
+      return { status: 'Invalid', reason: `SSID "${entrySSID}" not found in source records.` };
     }
 
-    if (potentialMatches.length === 0) return { status: 'Invalid', reason: 'No record found' };
-
-    let bestMatch = potentialMatches[0];
-    let bestScore = 0;
-    for (const match of potentialMatches) {
-      const srcSSID = extractField(match, ['SSID', 'ssid'], sourceHeaderRow);
-      const srcNIN = extractField(match, ['NIN', 'nin'], sourceHeaderRow);
-      const srcName = extractFullName(match, sourceHeaderRow);
-      let score = 0;
-      if (entrySSID && srcSSID && srcSSID === entrySSID) score += 40;
-      if (entryNIN && srcNIN && srcNIN === entryNIN) score += 40;
-      if (srcName) score += token_set_ratio(entryName, srcName) * 0.2;
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = match;
-      }
+    // SSID Matched. Now check the name.
+    const srcName = extractFullName(sourceRecord, sourceHeaderRow);
+    if (!srcName) {
+      return { status: 'Invalid', reason: `SSID "${entrySSID}" found, but source record has no name.` };
     }
-
-    const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
-    const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
-    const srcName = extractFullName(bestMatch, sourceHeaderRow);
-
-    if (!srcName) return { status: 'Invalid', reason: 'Source record missing name' };
-
-    const ssidMatches = !entrySSID || !srcSSID || entrySSID === srcSSID;
-    const ninMatches = !entryNIN || !srcNIN || entryNIN === srcNIN;
+    
     const nameSimilarity = token_set_ratio(entryName, srcName);
-    const nameMatches = nameSimilarity >= SIMILARITY_THRESHOLD;
 
-    if (ssidMatches && ninMatches && nameMatches) {
-      return { 
-        status: 'Valid', 
-        reason: `Verified (${nameSimilarity}% name match)`, 
-        matchedName: srcName, 
-        matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
-        matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
-        similarity: nameSimilarity 
+    const srcSSID = extractField(sourceRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
+    const srcNIN = extractField(sourceRecord, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow);
+
+    // Case 1: Valid Match (SSID matches, name is very similar)
+    if (nameSimilarity >= SIMILARITY_THRESHOLD_VALID) {
+      return {
+        status: 'Valid',
+        reason: `SSID matched. Name similarity is high (${nameSimilarity}%).`,
+        matchedName: srcName,
+        matchedSSID: srcSSID,
+        matchedNIN: srcNIN,
+        similarity: nameSimilarity
       };
     }
 
-    const mismatches: string[] = [];
-    if (!ssidMatches) mismatches.push(`SSID mismatch`);
-    if (!ninMatches) mismatches.push(`NIN mismatch`);
-    if (!nameMatches) mismatches.push(`Name similarity: ${nameSimilarity}%`);
+    // Case 2: Partial Match (SSID matches, name is moderately similar)
+    if (nameSimilarity >= SIMILARITY_THRESHOLD_PARTIAL) {
+      return {
+        status: 'Partial Match',
+        reason: `SSID matched, but name similarity is moderate (${nameSimilarity}%). Please review.`,
+        matchedName: srcName,
+        matchedSSID: srcSSID,
+        matchedNIN: srcNIN,
+        similarity: nameSimilarity
+      };
+    }
 
-    return { 
-      status: 'Partial Match', 
-      reason: `Issues: ${mismatches.join('; ')}`, 
-      matchedName: srcName, 
-      matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
-      matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
-      similarity: nameSimilarity 
+    // Case 3: Invalid (SSID matches, but names are too different)
+    return {
+      status: 'Invalid',
+      reason: `SSID matched, but name is completely different (${nameSimilarity}% similarity).`,
+      matchedName: srcName,
+      matchedSSID: srcSSID,
+      matchedNIN: srcNIN,
+      similarity: nameSimilarity
     };
+
   } catch (error) {
     return { status: 'Invalid', reason: `System error: ${error instanceof Error ? error.message : 'Unknown error'}` };
   }
@@ -249,22 +236,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const entriesHeaderRow = entriesWithHeader[entriesHeaderRowIndex];
     const entries = entriesWithHeader.slice(entriesHeaderRowIndex + 1);
 
+    // Index source data by SSID only, as per new logic
     const sourceBySSID = new Map<string, Entry>();
-    const sourceByNIN = new Map<string, Entry>();
-
     for (const srcRecord of source) {
       const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
-      const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow);
       if (ssid) sourceBySSID.set(ssid, srcRecord);
-      if (nin) sourceByNIN.set(nin, srcRecord);
     }
 
+    // Process entries against the index
     const results: ProcessedEntry[] = [];
     for (const entry of entries) {
-      const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN, sourceHeaderRow, entriesHeaderRow);
+      // Pass only the SSID map to the new getMatchStatus function
+      const matchResult = getMatchStatus(entry, sourceBySSID, sourceHeaderRow, entriesHeaderRow);
       results.push({ ...entry, 'Match Status': matchResult.status, 'Match Reason': matchResult.reason, 'Matched Name': matchResult.matchedName || '', 'Correct SSID': matchResult.matchedSSID || '', 'Correct NIN': matchResult.matchedNIN || '' });
     }
 
+    // Build and return the response
     const responseHeaders = entriesHeaderRow ? Object.keys(entriesHeaderRow).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : (entries[0] ? Object.keys(entries[0]).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : ['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']);
     
     const response = {
