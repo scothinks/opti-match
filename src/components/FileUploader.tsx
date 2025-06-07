@@ -69,7 +69,7 @@ export default function FileUploader({ label, onFileSelect, file, warningText }:
         <h3 className="text-lg font-semibold bg-gradient-to-r from-slate-700 to-slate-900 bg-clip-text text-transparent">
           {label}
         </h3>
-        <p className="text-sm text-slate-500 mt-1">Upload Excel files (.xlsx, .xls)</p>
+        <p className="text-sm text-slate-500 mt-1">Upload CSV or Excel files (.xlsx, .xls)</p>
       </div>
 
       {/* Upload Area */}
