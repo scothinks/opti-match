@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { upload } from '@vercel/blob/client'; // NEW: Import client-side upload function
+import { upload } from '@vercel/blob/client';
 import {
   Upload,
   Zap,
@@ -142,7 +142,8 @@ export default function Home() {
       const newBlob = await upload(file.name, file, {
         access: 'public',
         handleUploadUrl: '/api/upload',
-      });
+        allowOverwrite: true,
+      } as any); // <-- The fix is applied here
 
       if (fileType === 'source') {
         setSourceFileUrl(newBlob.url);
@@ -167,17 +168,14 @@ export default function Home() {
       showNotification('Please ensure both files are uploaded successfully before validation.', 'error');
       return;
     }
-
     setIsLoading(true);
     setCurrentStep(2);
     const startTime = Date.now();
-
     setStatus('Initializing validation process...');
     showNotification('Starting comprehensive validation...', 'info');
 
     try {
       setStatus('Processing data with our matching algorithms...');
-
       const res = await fetch('/api/validate', {
         method: 'POST',
         body: JSON.stringify({ sourceUrl: sourceFileUrl, toValidateUrl: toValidateFileUrl }),
@@ -187,10 +185,10 @@ export default function Home() {
       if (!res.ok) {
         let errorDetails = 'Validation failed on server.';
         try {
-            const errorData = await res.json();
-            errorDetails = errorData.details || errorData.error || errorDetails;
+          const errorData = await res.json();
+          errorDetails = errorData.details || errorData.error || errorDetails;
         } catch (jsonError) {
-            errorDetails = await res.text();
+          errorDetails = await res.text();
         }
         throw new Error(errorDetails);
       }
@@ -198,7 +196,6 @@ export default function Home() {
       const result: ApiResponse = await res.json();
       const endTime = Date.now();
       const duration = ((endTime - startTime) / 1000).toFixed(1);
-
       setResults(result.results);
       setDetectedHeaders(result.headers || []);
       setValidationStats(calculateStats(result.results));
