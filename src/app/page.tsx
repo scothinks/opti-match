@@ -541,7 +541,7 @@ export default function Home() {
               </div>
               <h3 className="text-2xl font-bold text-slate-800 mb-4">Welcome to OptiMatch</h3>
               <p className="text-slate-600 mb-8 leading-relaxed">
-                Upload your Excel files to begin intelligent ID validation with advanced matching algorithms. Get
+                Upload your CSV or Excel files to begin intelligent ID validation with advanced matching algorithms. Get
                 detailed insights, accuracy metrics, and comprehensive reports.
               </p>
 
@@ -551,7 +551,7 @@ export default function Home() {
                     <Upload className="w-4 h-4 text-blue-600" />
                   </div>
                   <h4 className="font-semibold text-slate-800 mb-2">Easy Upload</h4>
-                  <p className="text-sm text-slate-600">Drag & drop Excel files or click to browse</p>
+                  <p className="text-sm text-slate-600">Drag & drop CSV or Excel files or click to browse</p>
                 </div>
 
                 <div className="p-4 bg-purple-50/50 rounded-xl border border-purple-100">
