@@ -136,6 +136,8 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
   }
 }
 
+// ** MODIFIED AND CORRECTED **
+// This is the robust version that correctly filters out empty rows.
 async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: string[] }> {
     try {
         const response = await fetch(url);
@@ -146,19 +148,32 @@ async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: 
         const workbook = XLSX.read(data);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
+
         const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-        if (rowsAsArrays.length === 0) return { data: [], headers: [] };
+        if (rowsAsArrays.length === 0) {
+            return { data: [], headers: [] };
+        }
         
         const headerRowIndex = findBestHeaderRowIndex(rowsAsArrays);
         const headerArray: string[] = rowsAsArrays[headerRowIndex].map(h => String(h || '').trim());
         const dataRowsAsArrays = rowsAsArrays.slice(headerRowIndex + 1);
-        const jsonData: Entry[] = dataRowsAsArrays.map(rowArray => {
-            const entry: Entry = {};
-            headerArray.forEach((header, index) => {
-                if (header) entry[header] = rowArray[index];
-            });
-            return entry;
-        }).filter(obj => Object.values(obj).some(val => val !== null && val !== ''));
+
+        const jsonData: Entry[] = dataRowsAsArrays
+            .map(rowArray => {
+                const entry: Entry = {};
+                headerArray.forEach((header, index) => {
+                    // Only map values that have a corresponding header
+                    if (header) { 
+                        entry[header] = rowArray[index];
+                    }
+                });
+                return entry;
+            })
+            // **THE CRITICAL FIX**: Filter the array of *objects* afterwards.
+            // A row is only considered valid if at least one of its mapped values is not null, undefined, or an empty/whitespace string.
+            .filter(obj => 
+                Object.values(obj).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+            );
 
         return { data: jsonData, headers: headerArray.filter(h => h) };
     } catch (error) {
@@ -187,10 +202,7 @@ function findBestHeaderRowIndex(rows: any[][]): number {
     return headerRowIndex;
 }
 
-// --- MAIN POST HANDLER ---
-/**
- * **UPDATED:** Now detects duplicates in BOTH the source file and the validation file.
- */
+// --- MAIN POST HANDLER (unchanged) ---
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json();
@@ -208,7 +220,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (source.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
     if (entries.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
 
-    // --- Step 1: Check for duplicates in the SOURCE file (Data Integrity Check) ---
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
     const seenInSource = new Set<string>();
@@ -229,17 +240,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (nin) sourceByNIN.set(nin, srcRecord);
     }
 
-    // --- Step 2: Process the VALIDATION file, checking for internal duplicates ---
     const results: ProcessedEntry[] = [];
     const seenInValidation = new Set<string>();
     
     for (const entry of entries) {
       const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
 
-      // **NEW: Check for duplicates within the validation file itself.**
       if (entrySSID) {
         if (seenInValidation.has(entrySSID)) {
-          // This is a duplicate request within the validation file. Mark as invalid immediately.
           results.push({
             ...entry,
             'Match Status': 'Invalid',
@@ -248,12 +256,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             'Correct SSID': '',
             'Correct NIN': ''
           });
-          continue; // Skip to the next entry
+          continue; 
         }
         seenInValidation.add(entrySSID);
       }
       
-      // If not a validation-file duplicate, proceed with matching against the source.
       const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN);
       results.push({
         ...entry,
@@ -265,7 +272,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
-    // --- Step 3: Compile final response and summary ---
     const finalHeaders = Array.from(new Set([...entriesHeaders, 'Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']));
     
     const summary = {
