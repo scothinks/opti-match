@@ -2,7 +2,7 @@
 
 import { useState, useRef, ChangeEvent, FormEvent, Ref } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download, ArrowRight } from 'lucide-react';
+import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download } from 'lucide-react';
 
 // --- Type Definitions ---
 type ResultItem = {
@@ -40,7 +40,7 @@ export default function LookupPage() {
   const sourceFileInputRef = useRef<HTMLInputElement>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Logic (Functions remain the same) ---
+  // --- Logic ---
   const handleSourceFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) { setSourceFile(file); setCustomSourceUrl(null); }
@@ -90,6 +90,42 @@ export default function LookupPage() {
     }
   };
   
+  // **NEW**: Function to handle CSV download
+  const handleDownload = () => {
+    if (results.length === 0) return;
+
+    const headers = ['Status', 'SSID', 'Name Checked', 'Name in System'];
+    
+    // Helper to ensure values with commas or quotes are handled correctly
+    const escapeCsvCell = (cell: string | number) => {
+        const str = String(cell ?? '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+
+    const csvContent = [
+      headers.join(','),
+      ...results.map(row => [
+        escapeCsvCell(row.status),
+        escapeCsvCell(row.ssid),
+        escapeCsvCell(row.nameToVerify),
+        escapeCsvCell(row.correctNameInSystem)
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `lookup_results_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // --- UI Rendering Components ---
 
   const renderStatusBadge = (status: ResultItem['status']) => {
@@ -203,7 +239,18 @@ export default function LookupPage() {
 
               {results.length > 0 ? (
                   <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
-                      <div className="p-4 border-b border-slate-200"><h3 className="text-lg font-semibold text-slate-800">Results <span className="text-base font-normal text-slate-500">({results.length})</span></h3></div>
+                      {/* **MODIFIED**: Results header now includes the download button */}
+                      <div className="p-4 border-b border-slate-200 flex justify-between items-center">
+                          <h3 className="text-lg font-semibold text-slate-800">Results <span className="text-base font-normal text-slate-500">({results.length})</span></h3>
+                          <button 
+                              onClick={handleDownload}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-all"
+                              aria-label="Download results as CSV"
+                          >
+                              <Download size={14} />
+                              <span>Download CSV</span>
+                          </button>
+                      </div>
                       <div className="overflow-y-auto max-h-[60vh]">
                         <table className="min-w-full divide-y divide-slate-200">
                           <thead className="bg-slate-50 sticky top-0 z-10">
@@ -219,8 +266,8 @@ export default function LookupPage() {
                               <tr key={index} className="hover:bg-slate-50/70 transition-colors">
                                 <td className="px-4 py-3 whitespace-nowrap">{renderStatusBadge(result.status)}</td>
                                 <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-slate-600">{result.ssid}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-500 italic">{result.nameToVerify}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-800 font-semibold">{result.correctNameInSystem}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-500 italic">{result.nameToVerify || 'N/A'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-800 font-semibold">{result.correctNameInSystem || 'N/A'}</td>
                               </tr>
                             ))}
                           </tbody>
