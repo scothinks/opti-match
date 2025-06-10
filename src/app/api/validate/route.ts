@@ -220,6 +220,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (source.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
     if (entries.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
 
+    // The rest of the logic proceeds with correctly parsed data.
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
     const seenInSource = new Set<string>();
