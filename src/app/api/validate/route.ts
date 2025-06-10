@@ -29,7 +29,7 @@ const SIMILARITY_THRESHOLD = 90;
 const MAX_ENTRIES_LIMIT = 20000;
 const MAX_SOURCE_LIMIT = 500000;
 
-// --- HELPER FUNCTIONS ---
+// --- HELPER FUNCTIONS (unchanged) ---
 
 function normalize(value: unknown): string {
   if (value === null || value === undefined) {
@@ -38,16 +38,10 @@ function normalize(value: unknown): string {
   return String(value).trim().toLowerCase();
 }
 
-/**
- * **MODIFIED:** Simplified to no longer need the headerRow parameter.
- * It now reliably works on objects that have been correctly parsed.
- */
 function extractField(entry: Entry, possibleFieldNames: string[]): string {
     const entryKeys = Object.keys(entry);
     const normalizeKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-
     const possibleNormalizedNames = possibleFieldNames.map(normalizeKey);
-
     for (const key of entryKeys) {
         const normalizedKey = normalizeKey(key);
         if (possibleNormalizedNames.includes(normalizedKey)) {
@@ -60,9 +54,6 @@ function extractField(entry: Entry, possibleFieldNames: string[]): string {
     return '';
 }
 
-/**
- * **MODIFIED:** Simplified to no longer need the headerRow parameter.
- */
 function extractFullName(entry: Entry): string {
   const singleFullName = extractField(entry, ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name']);
   if (singleFullName) return singleFullName;
@@ -74,9 +65,6 @@ function extractFullName(entry: Entry): string {
   return '';
 }
 
-/**
- * **MODIFIED:** Simplified to no longer need headerRow parameters.
- */
 function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>): ValidationResult {
   try {
     const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
@@ -104,7 +92,7 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
       }
     }
 
-    if (potentialMatches.length === 0) return { status: 'Invalid', reason: 'No record found' };
+    if (potentialMatches.length === 0) return { status: 'Invalid', reason: 'No record found in source' };
 
     let bestMatch = potentialMatches[0];
     let bestScore = 0;
@@ -148,42 +136,8 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
   }
 }
 
-/**
- * **NEW:** Helper function to find the best header row from raw data.
- */
-function findBestHeaderRowIndex(rows: any[][]): number {
-    let headerRowIndex = 0;
-    let maxKeywords = 0;
-
-    const headerKeywords = ['ssid', 'nin', 'name', 'id', 'pension', 'account', 'bank', 'verification', 'no', 's/n'];
-
-    // Check the first 10 rows for the best candidate
-    for (let i = 0; i < Math.min(10, rows.length); i++) {
-        const row = rows[i];
-        if (!Array.isArray(row) || row.length === 0) continue;
-
-        // A good header row should contain mostly strings
-        const stringCellCount = row.filter(cell => typeof cell === 'string').length;
-        const totalCellCount = row.filter(cell => cell != null && cell !== '').length;
-
-        if (totalCellCount < 2 || (stringCellCount / totalCellCount < 0.5)) {
-            continue;
-        }
-
-        const rowStr = row.join(' ').toLowerCase();
-        const keywordMatches = headerKeywords.filter(k => rowStr.includes(k)).length;
-
-        if (keywordMatches > maxKeywords) {
-            maxKeywords = keywordMatches;
-            headerRowIndex = i;
-        }
-    }
-    return headerRowIndex;
-}
-
-/**
- * **REWRITTEN:** This function now correctly finds the header before parsing.
- */
+// ** MODIFIED AND CORRECTED **
+// This is the robust version that correctly filters out empty rows.
 async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: string[] }> {
     try {
         const response = await fetch(url);
@@ -195,43 +149,60 @@ async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: 
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
 
-        // 1. Get ALL rows as raw arrays to inspect them
         const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
         if (rowsAsArrays.length === 0) {
             return { data: [], headers: [] };
         }
         
-        // 2. Find the best header row from the raw data
         const headerRowIndex = findBestHeaderRowIndex(rowsAsArrays);
         const headerArray: string[] = rowsAsArrays[headerRowIndex].map(h => String(h || '').trim());
-        
-        // 3. The actual data starts on the row *after* the header
         const dataRowsAsArrays = rowsAsArrays.slice(headerRowIndex + 1);
 
-        // 4. Manually create objects using the correct headers as keys
-        const jsonData: Entry[] = dataRowsAsArrays.map(rowArray => {
-            const entry: Entry = {};
-            headerArray.forEach((header, index) => {
-                if (header) { // Only use non-empty header cells as keys
-                    entry[header] = rowArray[index];
-                }
-            });
-            return entry;
-        }).filter(obj => Object.values(obj).some(val => val !== null && val !== '')); // Filter out completely empty data rows
+        const jsonData: Entry[] = dataRowsAsArrays
+            .map(rowArray => {
+                const entry: Entry = {};
+                headerArray.forEach((header, index) => {
+                    // Only map values that have a corresponding header
+                    if (header) { 
+                        entry[header] = rowArray[index];
+                    }
+                });
+                return entry;
+            })
+            // **THE CRITICAL FIX**: Filter the array of *objects* afterwards.
+            // A row is only considered valid if at least one of its mapped values is not null, undefined, or an empty/whitespace string.
+            .filter(obj => 
+                Object.values(obj).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+            );
 
-        return { data: jsonData, headers: headerArray.filter(h => h) }; // Return clean data and headers
-
+        return { data: jsonData, headers: headerArray.filter(h => h) };
     } catch (error) {
         console.error(`Error parsing file from URL ${url}:`, error);
         throw new Error('Could not read or parse the file from storage.');
     }
 }
 
+function findBestHeaderRowIndex(rows: any[][]): number {
+    let headerRowIndex = 0;
+    let maxKeywords = 0;
+    const headerKeywords = ['ssid', 'nin', 'name', 'id', 'pension', 'account', 'bank', 'verification', 'no', 's/n'];
+    for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const row = rows[i];
+        if (!Array.isArray(row) || row.length === 0) continue;
+        const stringCellCount = row.filter(cell => typeof cell === 'string').length;
+        const totalCellCount = row.filter(cell => cell != null && cell !== '').length;
+        if (totalCellCount < 2 || (stringCellCount / totalCellCount < 0.5)) continue;
+        const rowStr = row.join(' ').toLowerCase();
+        const keywordMatches = headerKeywords.filter(k => rowStr.includes(k)).length;
+        if (keywordMatches > maxKeywords) {
+            maxKeywords = keywordMatches;
+            headerRowIndex = i;
+        }
+    }
+    return headerRowIndex;
+}
 
-// --- MAIN POST HANDLER ---
-/**
- * **MODIFIED:** Simplified to use the new robust parsing logic.
- */
+// --- MAIN POST HANDLER (unchanged) ---
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json();
@@ -241,7 +212,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Request body must include sourceUrl and toValidateUrl strings.' }, { status: 400 });
     }
     
-    // The new parseFileFromUrl handles all header detection and data slicing internally.
     const [{ data: source, headers: sourceHeaders }, { data: entries, headers: entriesHeaders }] = await Promise.all([
       parseFileFromUrl(sourceUrl),
       parseFileFromUrl(toValidateUrl),
@@ -253,42 +223,68 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // The rest of the logic proceeds with correctly parsed data.
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
+    const seenInSource = new Set<string>();
+    const sourceWarnings: string[] = [];
 
     for (const srcRecord of source) {
       const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+      if (ssid) {
+        if (seenInSource.has(ssid)) {
+          const entryName = extractFullName(srcRecord);
+          sourceWarnings.push(`Warning: Duplicate SSID '${ssid}' in source file for entry '${entryName || 'N/A'}'. This record was ignored.`);
+        } else {
+          seenInSource.add(ssid);
+          sourceBySSID.set(ssid, srcRecord);
+        }
+      }
       const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID']);
-      if (ssid) sourceBySSID.set(ssid, srcRecord);
       if (nin) sourceByNIN.set(nin, srcRecord);
     }
 
     const results: ProcessedEntry[] = [];
+    const seenInValidation = new Set<string>();
+    
     for (const entry of entries) {
+      const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+
+      if (entrySSID) {
+        if (seenInValidation.has(entrySSID)) {
+          results.push({
+            ...entry,
+            'Match Status': 'Invalid',
+            'Match Reason': `Duplicate request in validation file (SSID: ${entrySSID}).`,
+            'Matched Name': '',
+            'Correct SSID': '',
+            'Correct NIN': ''
+          });
+          continue; 
+        }
+        seenInValidation.add(entrySSID);
+      }
+      
       const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN);
-      results.push({ ...entry, 'Match Status': matchResult.status, 'Match Reason': matchResult.reason, 'Matched Name': matchResult.matchedName || '', 'Correct SSID': matchResult.matchedSSID || '', 'Correct NIN': matchResult.matchedNIN || '' });
+      results.push({
+        ...entry,
+        'Match Status': matchResult.status,
+        'Match Reason': matchResult.reason,
+        'Matched Name': matchResult.matchedName || '',
+        'Correct SSID': matchResult.matchedSSID || '',
+        'Correct NIN': matchResult.matchedNIN || ''
+      });
     }
 
-    // Use a Set to ensure final headers are unique
-    const finalHeaders = Array.from(new Set([
-        ...entriesHeaders, 
-        'Match Status', 
-        'Match Reason', 
-        'Matched Name', 
-        'Correct SSID', 
-        'Correct NIN'
-    ]));
+    const finalHeaders = Array.from(new Set([...entriesHeaders, 'Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']));
     
-    const response = {
-      headers: finalHeaders,
-      results: results,
-      summary: {
-        total: results.length,
-        valid: results.filter(r => r['Match Status'] === 'Valid').length,
-        invalid: results.filter(r => r['Match Status'] === 'Invalid').length,
-        partialMatch: results.filter(r => r['Match Status'] === 'Partial Match').length,
-      }
+    const summary = {
+      total: results.length,
+      valid: results.filter(r => r['Match Status'] === 'Valid').length,
+      invalid: results.filter(r => r['Match Status'] === 'Invalid').length,
+      partialMatch: results.filter(r => r['Match Status'] === 'Partial Match').length,
+      duplicatesInValidationFile: results.filter(r => r['Match Reason'].startsWith('Duplicate request in validation file')).length,
+      sourceFileWarnings: sourceWarnings,
     };
 
-    return NextResponse.json(response, { status: 200 });
+    return NextResponse.json({ headers: finalHeaders, results, summary }, { status: 200 });
 
   } catch (error) {
     console.error('Server error:', error);
@@ -300,14 +296,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 // Other HTTP methods (unchanged)
-export async function GET() {
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
-}
-
-export async function PUT() {
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
-}
-
-export async function DELETE() {
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
-}
+export async function GET() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
+export async function PUT() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
+export async function DELETE() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
