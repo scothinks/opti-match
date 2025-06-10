@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef, ChangeEvent, FormEvent, Ref } from 'react';
+import Link from 'next/link'; // **NEW**: Import Link for navigation
 import { upload } from '@vercel/blob/client';
-import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download } from 'lucide-react';
+import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download, Home, RefreshCcw } from 'lucide-react'; // **NEW**: Import Home and RefreshCcw icons
 
 // --- Type Definitions ---
 type ResultItem = {
@@ -55,20 +56,37 @@ export default function LookupPage() {
   const clearBatchFile = () => {
     setBatchFile(null); if(batchFileInputRef.current) batchFileInputRef.current.value = "";
   };
+  
+  // **NEW**: Function to reset the entire form and results state
+  const handleReset = () => {
+    setResults([]);
+    setError(null);
+    setSourceUsed(null);
+    setSourceRecordCount(null);
+    setSingleSsid('');
+    setSingleName('');
+    clearBatchFile();
+    // Optionally, you can also clear the custom source file
+    // clearSourceFile(); 
+    // setShowCustomSource(false);
+  };
+
   const performLookup = async (payload: object) => {
     const lookupResponse = await fetch('/api/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!lookupResponse.ok) { const errorData = await lookupResponse.json(); throw new Error(errorData.details || 'An error occurred during lookup.'); }
     const data = await lookupResponse.json();
     setResults(data.results); setSourceRecordCount(data.sourceRecordCount); setSourceUsed(data.sourceUsed);
   };
+  
   const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault(); setIsLoading(true); setError(null); setResults([]); setSourceRecordCount(null); setSourceUsed(null);
+    e.preventDefault(); 
+    handleReset(); // Clear previous results before starting
+    setIsLoading(true);
     let tempSourceUrl = customSourceUrl;
     try {
       if (sourceFile && !tempSourceUrl) {
         setStatusText('Uploading source file...');
-        const uniqueFilename = `${Date.now()}-${sourceFile.name}`;
-        const newBlob = await upload(uniqueFilename, sourceFile, { access: 'public', handleUploadUrl: '/api/upload' });
+        const newBlob = await upload(`${Date.now()}-${sourceFile.name}`, sourceFile, { access: 'public', handleUploadUrl: '/api/upload' });
         tempSourceUrl = newBlob.url; setCustomSourceUrl(tempSourceUrl);
       }
       if (activeTab === 'single') {
@@ -78,8 +96,7 @@ export default function LookupPage() {
       } else if (activeTab === 'batch') {
         if (!batchFile) throw new Error('Please select a batch file to upload.');
         setStatusText('Uploading batch file...');
-        const uniqueFilename = `${Date.now()}-${batchFile.name}`;
-        const newBlob = await upload(uniqueFilename, batchFile, { access: 'public', handleUploadUrl: '/api/upload' });
+        const newBlob = await upload(`${Date.now()}-${batchFile.name}`, batchFile, { access: 'public', handleUploadUrl: '/api/upload' });
         setStatusText('Processing batch file...');
         await performLookup({ batchFileUrl: newBlob.url, sourceUrl: tempSourceUrl });
       }
@@ -90,13 +107,9 @@ export default function LookupPage() {
     }
   };
   
-  // **NEW**: Function to handle CSV download
   const handleDownload = () => {
     if (results.length === 0) return;
-
     const headers = ['Status', 'SSID', 'Name Checked', 'Name in System'];
-    
-    // Helper to ensure values with commas or quotes are handled correctly
     const escapeCsvCell = (cell: string | number) => {
         const str = String(cell ?? '');
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -104,7 +117,6 @@ export default function LookupPage() {
         }
         return str;
     };
-
     const csvContent = [
       headers.join(','),
       ...results.map(row => [
@@ -114,7 +126,6 @@ export default function LookupPage() {
         escapeCsvCell(row.correctNameInSystem)
       ].join(','))
     ].join('\n');
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -127,7 +138,7 @@ export default function LookupPage() {
   };
 
   // --- UI Rendering Components ---
-
+  // (renderStatusBadge and renderFileUploader remain unchanged)
   const renderStatusBadge = (status: ResultItem['status']) => {
     const styles = {
       Match: "bg-emerald-100 text-emerald-800",
@@ -165,6 +176,14 @@ export default function LookupPage() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
       <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* **NEW**: Home navigation link */}
+        <div className="mb-8 text-center">
+            <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
+                <Home size={16} />
+                <span>Return to Home</span>
+            </Link>
+        </div>
+
         <div className="text-center mb-12">
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-700 bg-clip-text text-transparent">Smart SSID Lookup</h1>
           <p className="mt-4 text-lg text-slate-600 max-w-2xl mx-auto">Look up single entries or process batch files against a default or custom data source.</p>
@@ -239,17 +258,27 @@ export default function LookupPage() {
 
               {results.length > 0 ? (
                   <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
-                      {/* **MODIFIED**: Results header now includes the download button */}
-                      <div className="p-4 border-b border-slate-200 flex justify-between items-center">
+                      <div className="p-4 border-b border-slate-200 flex justify-between items-center flex-wrap gap-2">
                           <h3 className="text-lg font-semibold text-slate-800">Results <span className="text-base font-normal text-slate-500">({results.length})</span></h3>
-                          <button 
-                              onClick={handleDownload}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-all"
-                              aria-label="Download results as CSV"
-                          >
-                              <Download size={14} />
-                              <span>Download CSV</span>
-                          </button>
+                          <div className="flex items-center gap-2">
+                              {/* **NEW**: Button to reset the form and start a new lookup */}
+                              <button 
+                                  onClick={handleReset}
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm text-slate-700 bg-slate-100 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 transition-all"
+                                  aria-label="Start a new lookup"
+                              >
+                                  <RefreshCcw size={14} />
+                                  <span>New Lookup</span>
+                              </button>
+                              <button 
+                                  onClick={handleDownload}
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+                                  aria-label="Download results as CSV"
+                              >
+                                  <Download size={14} />
+                                  <span>Download CSV</span>
+                              </button>
+                          </div>
                       </div>
                       <div className="overflow-y-auto max-h-[60vh]">
                         <table className="min-w-full divide-y divide-slate-200">
