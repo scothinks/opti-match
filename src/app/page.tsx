@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react'; // Import useCallback
+import { useEffect, useState, useCallback } from 'react';
 import { upload } from '@vercel/blob/client';
+import Link from 'next/link';
 import {
   Upload,
   Zap,
@@ -18,9 +19,10 @@ import {
   Clock,
   Database,
   Download,
+  Search,
 } from 'lucide-react';
 
-// Import components (these would be in separate files)
+// Import components
 import FileUploader from '@/components/FileUploader';
 import ResultTable from '@/components/ResultTable';
 import MatchChart from '@/components/MatchChart';
@@ -56,11 +58,9 @@ export default function Home() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [toValidateFile, setToValidateFile] = useState<File | null>(null);
   
-  // State for Vercel Blob URLs
   const [sourceFileUrl, setSourceFileUrl] = useState<string | null>(null);
   const [toValidateFileUrl, setToValidateFileUrl] = useState<string | null>(null);
 
-  // State to track upload progress
   const [isUploadingSource, setIsUploadingSource] = useState(false);
   const [isUploadingValidation, setIsUploadingValidation] = useState(false);
 
@@ -79,7 +79,6 @@ export default function Home() {
 
   const steps = ['Upload Files', 'Configure', 'Validate', 'Results'];
 
-  // This effect now only triggers when the file URLs are available.
   useEffect(() => {
     if (sourceFileUrl && toValidateFileUrl) {
       setShowPreview(true);
@@ -90,7 +89,6 @@ export default function Home() {
     }
   }, [sourceFileUrl, toValidateFileUrl]);
 
-  // This separate effect handles advancing to the results step.
   useEffect(() => {
     if (results.length > 0) {
       setCurrentStep(3);
@@ -238,7 +236,7 @@ export default function Home() {
       setValidationStats(calculateStats(updatedResults));
       showNotification('Match has been manually approved.', 'success');
     }
-  }, [results]); // Dependency array includes 'results'
+  }, [results]);
 
   const handleEditFiles = () => {
     setShowPreview(false);
@@ -272,14 +270,26 @@ export default function Home() {
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-gradient-to-br from-blue-400/10 to-indigo-400/10 rounded-full blur-2xl" />
       </div>
       <div className="relative z-10 container mx-auto px-4 py-8">
+        
+        {/* --- NEW, RELOCATED ENTRY POINT --- */}
+        <div className="absolute top-6 right-6 z-20">
+            <Link href="/lookup" className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm text-slate-700 font-semibold px-4 py-2 rounded-full hover:bg-white hover:text-indigo-600 transition-colors shadow-lg border border-slate-200 text-sm">
+                <Search className="w-4 h-4" />
+                Quick Lookup
+            </Link>
+        </div>
+
         {/* Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-12"> {/* Increased margin bottom */}
           <div className="inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-full px-6 py-2 shadow-lg border border-slate-200 mb-6">
             <Shield className="w-5 h-5 text-indigo-600" /><span className="text-sm font-medium text-slate-700">Internal Tool</span>
           </div>
           <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-slate-800 via-indigo-700 to-purple-800 bg-clip-text text-transparent mb-4 tracking-tight">OptiMatch</h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">Intelligent ID validation with advanced matching algorithms, real-time analytics, and comprehensive reporting</p>
         </div>
+        
+        {/* --- ENTRY POINT REMOVED FROM HERE --- */}
+
         {/* Progress Steps */}
         <div className="flex items-center justify-center mb-12">
           <div className="flex items-center space-x-2 md:space-x-6 bg-white/60 backdrop-blur-sm rounded-2xl px-6 py-4 shadow-lg border border-slate-200">
@@ -294,6 +304,9 @@ export default function Home() {
             ))}
           </div>
         </div>
+        
+        {/* The rest of the page remains unchanged */}
+        {/* ... */}
         {/* File Upload Section */}
         {!showPreview && (
           <div className="max-w-4xl mx-auto mb-12">

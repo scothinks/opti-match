@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { token_set_ratio } from 'fuzzball';
 import * as XLSX from 'xlsx';
 
-// Types and interfaces
+// Types and interfaces (unchanged)
 type Entry = {
   [key: string]: string | number | null | undefined;
 };
@@ -19,17 +19,17 @@ type ValidationResult = {
 type ProcessedEntry = Entry & {
   'Match Status': string;
   'Match Reason': string;
-  'Matched Name': string;
+  'Matched Name':string;
   'Correct SSID': string;
   'Correct NIN': string;
 };
 
-// Configuration constants
+// Configuration constants (unchanged)
 const SIMILARITY_THRESHOLD = 90;
 const MAX_ENTRIES_LIMIT = 20000;
 const MAX_SOURCE_LIMIT = 500000;
 
-// HELPER FUNCTIONS (normalize, isLikelyHeaderRow, findHeaderRow, extractField, etc.)
+// --- HELPER FUNCTIONS ---
 
 function normalize(value: unknown): string {
   if (value === null || value === undefined) {
@@ -38,95 +38,50 @@ function normalize(value: unknown): string {
   return String(value).trim().toLowerCase();
 }
 
-function isLikelyHeaderRow(row: Record<string, unknown>): boolean {
-  const values = Object.values(row).map(String).map(v => v.toLowerCase());
-  const headerPatterns = [
-    /^(ssid|nin|id|number|no\.?|ref|reference)$/,
-    /^(name|full.?name|beneficiary|customer|person)$/,
-    /^(status|state|condition|result)$/,
-    /^(bank|account|acct|institution)$/,
-    /^(date|time|created|updated|modified)$/,
-    /^(column|field|data|info|details)$/
-  ];
-  const hasHeaderPattern = values.some(value => 
-    headerPatterns.some(pattern => pattern.test(value))
-  );
-  const hasTextContent = values.some(value => 
-    value.length > 0 && isNaN(Number(value)) && !/^\d+$/.test(value) && value !== 'null' && value !== 'undefined'
-  );
-  const hasReasonableLength = values.some(value => value.length >= 2 && value.length <= 50);
-  return hasHeaderPattern || (hasTextContent && hasReasonableLength);
-}
+/**
+ * **MODIFIED:** Simplified to no longer need the headerRow parameter.
+ * It now reliably works on objects that have been correctly parsed.
+ */
+function extractField(entry: Entry, possibleFieldNames: string[]): string {
+    const entryKeys = Object.keys(entry);
+    const normalizeKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-function findHeaderRow(rows: Entry[]): number {
-  if (rows.length === 0) return 0;
-  if (isLikelyHeaderRow(rows[0])) return 0;
-  for (let i = 0; i < Math.min(5, rows.length); i++) {
-    if (isLikelyHeaderRow(rows[i])) return i;
-  }
-  if (rows.length > 1) {
-    const firstRowValues = Object.values(rows[0]).map(String);
-    const secondRowValues = Object.values(rows[1]).map(String);
-    const firstRowHasText = firstRowValues.some(v => v.length > 0 && isNaN(Number(v)) && !/^\d+$/.test(v));
-    const secondRowHasMoreNumbers = secondRowValues.filter(v => !isNaN(Number(v)) || /^\d+$/.test(v)).length > firstRowValues.filter(v => !isNaN(Number(v)) || /^\d+$/.test(v)).length;
-    if (firstRowHasText && secondRowHasMoreNumbers) return 0;
-  }
-  return 0;
-}
+    const possibleNormalizedNames = possibleFieldNames.map(normalizeKey);
 
-function extractField(entry: Entry, possibleFieldNames: string[], headerRow?: Entry): string {
-  const normalizeKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^_+|_+$/g, '').replace('fullname', 'name').replace('beneficiaryname', 'name').replace('customername', 'name').replace('personname', 'name').replace('nin', 'nationalid').replace('ssid', 'socialsecurity').replace('socialsecurityid', 'socialsecurity').replace('ssn', 'socialsecurity');
-  if (headerRow) {
-    const fieldMap: Record<string, string> = {};
-    for (const [key, value] of Object.entries(headerRow)) {
-      if (value !== null && value !== undefined) {
-        const normalizedValue = normalizeKey(String(value));
-        if (normalizedValue) fieldMap[normalizedValue] = key;
-      }
-    }
-    for (const field of possibleFieldNames) {
-      const normalizedField = normalizeKey(field);
-      if (fieldMap[normalizedField]) {
-        const value = entry[fieldMap[normalizedField]];
-        if (value !== null && value !== undefined) {
-          const stringValue = String(value).trim();
-          if (stringValue) return normalize(stringValue);
+    for (const key of entryKeys) {
+        const normalizedKey = normalizeKey(key);
+        if (possibleNormalizedNames.includes(normalizedKey)) {
+            const value = entry[key];
+            if (value !== null && value !== undefined) {
+                return normalize(value);
+            }
         }
-      }
     }
-  }
-  for (const field of possibleFieldNames) {
-    if (entry[field] !== undefined && entry[field] !== null) {
-      const stringValue = String(entry[field]).trim();
-      if (stringValue) return normalize(stringValue);
-    }
-    const normalizedField = normalizeKey(field);
-    for (const [key, value] of Object.entries(entry)) {
-      if (normalizeKey(key) === normalizedField && value !== null && value !== undefined) {
-        const stringValue = String(value).trim();
-        if (stringValue) return normalize(stringValue);
-      }
-    }
-  }
-  return '';
+    return '';
 }
 
-function extractFullName(entry: Entry, headerRow?: Entry): string {
-  const singleFullName = extractField(entry, ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name'], headerRow);
+/**
+ * **MODIFIED:** Simplified to no longer need the headerRow parameter.
+ */
+function extractFullName(entry: Entry): string {
+  const singleFullName = extractField(entry, ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name']);
   if (singleFullName) return singleFullName;
-  const firstName = extractField(entry, ['firstname', 'first_name', 'first'], headerRow);
-  const middleName = extractField(entry, ['middlename', 'middle_name', 'middle'], headerRow);
-  const lastName = extractField(entry, ['lastname', 'last_name', 'last', 'surname'], headerRow);
+  const firstName = extractField(entry, ['firstname', 'first_name', 'first']);
+  const middleName = extractField(entry, ['middlename', 'middle_name', 'middle']);
+  const lastName = extractField(entry, ['lastname', 'last_name', 'last', 'surname']);
   const nameParts = [firstName, middleName, lastName].filter(Boolean);
   if (nameParts.length > 0) return normalize(nameParts.join(' '));
   return '';
 }
 
-function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>, sourceHeaderRow?: Entry, entryHeaderRow?: Entry): ValidationResult {
+/**
+ * **MODIFIED:** Simplified to no longer need headerRow parameters.
+ */
+function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>): ValidationResult {
   try {
-    const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], entryHeaderRow);
-    const entryNIN = extractField(entry, ['NIN', 'nin', 'Nin', 'NationalID'], entryHeaderRow);
-    const entryName = extractFullName(entry, entryHeaderRow);
+    const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+    const entryNIN = extractField(entry, ['NIN', 'nin', 'Nin', 'NationalID']);
+    const entryName = extractFullName(entry);
 
     if (!entryName) return { status: 'Invalid', reason: `Missing name field.` };
     if (!entrySSID && !entryNIN) return { status: 'Invalid', reason: 'Missing both SSID and NIN' };
@@ -154,9 +109,9 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     let bestMatch = potentialMatches[0];
     let bestScore = 0;
     for (const match of potentialMatches) {
-      const srcSSID = extractField(match, ['SSID', 'ssid'], sourceHeaderRow);
-      const srcNIN = extractField(match, ['NIN', 'nin'], sourceHeaderRow);
-      const srcName = extractFullName(match, sourceHeaderRow);
+      const srcSSID = extractField(match, ['SSID', 'ssid']);
+      const srcNIN = extractField(match, ['NIN', 'nin']);
+      const srcName = extractFullName(match);
       let score = 0;
       if (entrySSID && srcSSID && srcSSID === entrySSID) score += 40;
       if (entryNIN && srcNIN && srcNIN === entryNIN) score += 40;
@@ -167,9 +122,9 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
       }
     }
 
-    const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid'], sourceHeaderRow);
-    const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin'], sourceHeaderRow);
-    const srcName = extractFullName(bestMatch, sourceHeaderRow);
+    const srcSSID = extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+    const srcNIN = extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID']);
+    const srcName = extractFullName(bestMatch);
 
     if (!srcName) return { status: 'Invalid', reason: 'Source record missing name' };
 
@@ -179,14 +134,7 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     const nameMatches = nameSimilarity >= SIMILARITY_THRESHOLD;
 
     if (ssidMatches && ninMatches && nameMatches) {
-      return { 
-        status: 'Valid', 
-        reason: `Verified (${nameSimilarity}% name match)`, 
-        matchedName: srcName, 
-        matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
-        matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
-        similarity: nameSimilarity 
-      };
+      return { status: 'Valid', reason: `Verified (${nameSimilarity}% name match)`, matchedName: srcName, matchedSSID: srcSSID, matchedNIN: srcNIN, similarity: nameSimilarity };
     }
 
     const mismatches: string[] = [];
@@ -194,36 +142,96 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     if (!ninMatches) mismatches.push(`NIN mismatch`);
     if (!nameMatches) mismatches.push(`Name similarity: ${nameSimilarity}%`);
 
-    return { 
-      status: 'Partial Match', 
-      reason: `Issues: ${mismatches.join('; ')}`, 
-      matchedName: srcName, 
-      matchedSSID: extractField(bestMatch, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow), 
-      matchedNIN: extractField(bestMatch, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow), 
-      similarity: nameSimilarity 
-    };
+    return { status: 'Partial Match', reason: `Issues: ${mismatches.join('; ')}`, matchedName: srcName, matchedSSID: srcSSID, matchedNIN: srcNIN, similarity: nameSimilarity };
   } catch (error) {
     return { status: 'Invalid', reason: `System error: ${error instanceof Error ? error.message : 'Unknown error'}` };
   }
 }
 
-async function parseFileFromUrl(url: string): Promise<Entry[]> {
+/**
+ * **NEW:** Helper function to find the best header row from raw data.
+ */
+function findBestHeaderRowIndex(rows: any[][]): number {
+    let headerRowIndex = 0;
+    let maxKeywords = 0;
+
+    const headerKeywords = ['ssid', 'nin', 'name', 'id', 'pension', 'account', 'bank', 'verification', 'no', 's/n'];
+
+    // Check the first 10 rows for the best candidate
+    for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const row = rows[i];
+        if (!Array.isArray(row) || row.length === 0) continue;
+
+        // A good header row should contain mostly strings
+        const stringCellCount = row.filter(cell => typeof cell === 'string').length;
+        const totalCellCount = row.filter(cell => cell != null && cell !== '').length;
+
+        if (totalCellCount < 2 || (stringCellCount / totalCellCount < 0.5)) {
+            continue;
+        }
+
+        const rowStr = row.join(' ').toLowerCase();
+        const keywordMatches = headerKeywords.filter(k => rowStr.includes(k)).length;
+
+        if (keywordMatches > maxKeywords) {
+            maxKeywords = keywordMatches;
+            headerRowIndex = i;
+        }
+    }
+    return headerRowIndex;
+}
+
+/**
+ * **REWRITTEN:** This function now correctly finds the header before parsing.
+ */
+async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: string[] }> {
     try {
         const response = await fetch(url);
         if (!response.ok) {
-            throw new Error(`Failed to fetch file from blob storage: ${response.statusText}`);
+            throw new Error(`Failed to fetch file: ${response.statusText}`);
         }
         const data = await response.arrayBuffer();
         const workbook = XLSX.read(data);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        return XLSX.utils.sheet_to_json(sheet);
+
+        // 1. Get ALL rows as raw arrays to inspect them
+        const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+        if (rowsAsArrays.length === 0) {
+            return { data: [], headers: [] };
+        }
+        
+        // 2. Find the best header row from the raw data
+        const headerRowIndex = findBestHeaderRowIndex(rowsAsArrays);
+        const headerArray: string[] = rowsAsArrays[headerRowIndex].map(h => String(h || '').trim());
+        
+        // 3. The actual data starts on the row *after* the header
+        const dataRowsAsArrays = rowsAsArrays.slice(headerRowIndex + 1);
+
+        // 4. Manually create objects using the correct headers as keys
+        const jsonData: Entry[] = dataRowsAsArrays.map(rowArray => {
+            const entry: Entry = {};
+            headerArray.forEach((header, index) => {
+                if (header) { // Only use non-empty header cells as keys
+                    entry[header] = rowArray[index];
+                }
+            });
+            return entry;
+        }).filter(obj => Object.values(obj).some(val => val !== null && val !== '')); // Filter out completely empty data rows
+
+        return { data: jsonData, headers: headerArray.filter(h => h) }; // Return clean data and headers
+
     } catch (error) {
         console.error(`Error parsing file from URL ${url}:`, error);
         throw new Error('Could not read or parse the file from storage.');
     }
 }
 
+
+// --- MAIN POST HANDLER ---
+/**
+ * **MODIFIED:** Simplified to use the new robust parsing logic.
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json();
@@ -232,43 +240,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!sourceUrl || !toValidateUrl || typeof sourceUrl !== 'string' || typeof toValidateUrl !== 'string') {
       return NextResponse.json({ error: 'Request body must include sourceUrl and toValidateUrl strings.' }, { status: 400 });
     }
-
-    const [sourceWithHeader, entriesWithHeader] = await Promise.all([
+    
+    // The new parseFileFromUrl handles all header detection and data slicing internally.
+    const [{ data: source, headers: sourceHeaders }, { data: entries, headers: entriesHeaders }] = await Promise.all([
       parseFileFromUrl(sourceUrl),
       parseFileFromUrl(toValidateUrl),
     ]);
 
-    if (sourceWithHeader.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
-    if (entriesWithHeader.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
+    if (source.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
+    if (entries.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
 
-    const sourceHeaderRowIndex = findHeaderRow(sourceWithHeader);
-    const sourceHeaderRow = sourceWithHeader[sourceHeaderRowIndex];
-    const source = sourceWithHeader.slice(sourceHeaderRowIndex + 1);
-
-    const entriesHeaderRowIndex = findHeaderRow(entriesWithHeader);
-    const entriesHeaderRow = entriesWithHeader[entriesHeaderRowIndex];
-    const entries = entriesWithHeader.slice(entriesHeaderRowIndex + 1);
-
+    // The rest of the logic proceeds with correctly parsed data.
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
 
     for (const srcRecord of source) {
-      const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN'], sourceHeaderRow);
-      const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID'], sourceHeaderRow);
+      const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+      const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID']);
       if (ssid) sourceBySSID.set(ssid, srcRecord);
       if (nin) sourceByNIN.set(nin, srcRecord);
     }
 
     const results: ProcessedEntry[] = [];
     for (const entry of entries) {
-      const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN, sourceHeaderRow, entriesHeaderRow);
+      const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN);
       results.push({ ...entry, 'Match Status': matchResult.status, 'Match Reason': matchResult.reason, 'Matched Name': matchResult.matchedName || '', 'Correct SSID': matchResult.matchedSSID || '', 'Correct NIN': matchResult.matchedNIN || '' });
     }
 
-    const responseHeaders = entriesHeaderRow ? Object.keys(entriesHeaderRow).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : (entries[0] ? Object.keys(entries[0]).concat(['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']) : ['Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']);
+    // Use a Set to ensure final headers are unique
+    const finalHeaders = Array.from(new Set([
+        ...entriesHeaders, 
+        'Match Status', 
+        'Match Reason', 
+        'Matched Name', 
+        'Correct SSID', 
+        'Correct NIN'
+    ]));
     
     const response = {
-      headers: responseHeaders,
+      headers: finalHeaders,
       results: results,
       summary: {
         total: results.length,
@@ -289,7 +299,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-// Other HTTP methods
+// Other HTTP methods (unchanged)
 export async function GET() {
   return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
 }
