@@ -110,7 +110,8 @@ Visit [http://localhost:3000](http://localhost:3000) to explore the app.
 
 ## 🛣️ Roadmap
 
-- ✅ **Shareable Sessions** – Allow session sharing via unique link  
+- 🔜 **Shareable Sessions** – Allow session sharing via unique link 
+- 🔜 **Access Control** – Implement user permissions for approving partial and invalid results. 
 - 🔜 **Database Integration** – Move to Vercel Postgres for structured persistence  
 - 🔜 **Advanced Visualizations** – Use Chart.js for rich validation summaries  
 
