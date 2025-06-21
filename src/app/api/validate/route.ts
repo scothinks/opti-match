@@ -1,8 +1,11 @@
+// Import necessary modules for Next.js API route, fuzzy matching, and Excel file handling.
 import { NextRequest, NextResponse } from 'next/server';
 import { token_set_ratio } from 'fuzzball';
 import * as XLSX from 'xlsx';
+// Import our custom data source module, which handles fetching and caching the master list.
+import { getDataSource } from '@/lib/dataSource';
 
-// Types and interfaces (unchanged)
+// --- Type Definitions ---
 type Entry = {
   [key: string]: string | number | null | undefined;
 };
@@ -24,12 +27,12 @@ type ProcessedEntry = Entry & {
   'Correct NIN': string;
 };
 
-// Configuration constants (unchanged)
-const SIMILARITY_THRESHOLD = 90;
-const MAX_ENTRIES_LIMIT = 20000;
-const MAX_SOURCE_LIMIT = 500000;
+// --- Configuration Constants ---
+const SIMILARITY_THRESHOLD = 90; // Name similarity score threshold.
+const MAX_ENTRIES_LIMIT = 20000; // Max records in validation file.
+const MAX_SOURCE_LIMIT = 500000; // Max records in default source file.
 
-// --- HELPER FUNCTIONS (unchanged) ---
+// --- HELPER FUNCTIONS ---
 
 function normalize(value: unknown): string {
   if (value === null || value === undefined) {
@@ -39,12 +42,11 @@ function normalize(value: unknown): string {
 }
 
 function extractField(entry: Entry, possibleFieldNames: string[]): string {
-    const entryKeys = Object.keys(entry);
     const normalizeKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
     const possibleNormalizedNames = possibleFieldNames.map(normalizeKey);
-    for (const key of entryKeys) {
-        const normalizedKey = normalizeKey(key);
-        if (possibleNormalizedNames.includes(normalizedKey)) {
+
+    for (const key of Object.keys(entry)) {
+        if (possibleNormalizedNames.includes(normalizeKey(key))) {
             const value = entry[key];
             if (value !== null && value !== undefined) {
                 return normalize(value);
@@ -57,14 +59,20 @@ function extractField(entry: Entry, possibleFieldNames: string[]): string {
 function extractFullName(entry: Entry): string {
   const singleFullName = extractField(entry, ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name', 'Customer Name', 'Person Name']);
   if (singleFullName) return singleFullName;
+
   const firstName = extractField(entry, ['firstname', 'first_name', 'first']);
   const middleName = extractField(entry, ['middlename', 'middle_name', 'middle']);
   const lastName = extractField(entry, ['lastname', 'last_name', 'last', 'surname']);
+
   const nameParts = [firstName, middleName, lastName].filter(Boolean);
   if (nameParts.length > 0) return normalize(nameParts.join(' '));
   return '';
 }
 
+/**
+ * Determines the validation status for a single entry against the source data.
+ * IMPORTANT: This function now includes stricter identifier matching.
+ */
 function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceByNIN: Map<string, Entry>): ValidationResult {
   try {
     const entrySSID = extractField(entry, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
@@ -77,33 +85,31 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
     const potentialMatches: Entry[] = [];
     const foundMatches = new Set<Entry>();
 
+    // Look up by SSID and NIN to find all potential source matches.
     if (entrySSID && sourceBySSID.has(entrySSID)) {
       const match = sourceBySSID.get(entrySSID)!;
-      if (!foundMatches.has(match)) {
-        potentialMatches.push(match);
-        foundMatches.add(match);
-      }
+      if (!foundMatches.has(match)) { potentialMatches.push(match); foundMatches.add(match); }
     }
     if (entryNIN && sourceByNIN.has(entryNIN)) {
       const match = sourceByNIN.get(entryNIN)!;
-      if (!foundMatches.has(match)) {
-        potentialMatches.push(match);
-        foundMatches.add(match);
-      }
+      if (!foundMatches.has(match)) { potentialMatches.push(match); foundMatches.add(match); }
     }
 
     if (potentialMatches.length === 0) return { status: 'Invalid', reason: 'No record found in source' };
 
+    // Select the best match based on a scoring system.
     let bestMatch = potentialMatches[0];
     let bestScore = 0;
     for (const match of potentialMatches) {
-      const srcSSID = extractField(match, ['SSID', 'ssid']);
-      const srcNIN = extractField(match, ['NIN', 'nin']);
+      const srcSSID = extractField(match, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
+      const srcNIN = extractField(match, ['NIN', 'nin', 'Nin', 'NationalID']);
       const srcName = extractFullName(match);
+
       let score = 0;
       if (entrySSID && srcSSID && srcSSID === entrySSID) score += 40;
       if (entryNIN && srcNIN && srcNIN === entryNIN) score += 40;
       if (srcName) score += token_set_ratio(entryName, srcName) * 0.2;
+      
       if (score > bestScore) {
         bestScore = score;
         bestMatch = match;
@@ -116,15 +122,49 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
 
     if (!srcName) return { status: 'Invalid', reason: 'Source record missing name' };
 
-    const ssidMatches = !entrySSID || !srcSSID || entrySSID === srcSSID;
-    const ninMatches = !entryNIN || !srcNIN || entryNIN === srcNIN;
+    // --- UPDATED LOGIC FOR STRICTER IDENTIFIER MATCHING ---
+    // If an identifier is present in BOTH entry and source, they MUST be equal.
+    // If an identifier is present in ONE but missing in the OTHER, it's a mismatch.
+    // If an identifier is missing in BOTH, it does not cause a mismatch.
+
+    let ssidMatches = true; // Assume true initially
+    const entrySSIDPresent = !!entrySSID;
+    const srcSSIDPresent = !!srcSSID;
+
+    if (entrySSIDPresent && srcSSIDPresent) {
+        // Both present: they must be equal
+        ssidMatches = (entrySSID === srcSSID);
+    } else if (entrySSIDPresent !== srcSSIDPresent) {
+        // One is present, the other is missing: this is a mismatch
+        ssidMatches = false;
+    }
+    // If both are missing (else case), ssidMatches remains true, meaning no mismatch caused by absence.
+
+    let ninMatches = true; // Assume true initially
+    const entryNINPresent = !!entryNIN;
+    const srcNINPresent = !!srcNIN;
+
+    if (entryNINPresent && srcNINPresent) {
+        // Both present: they must be equal
+        ninMatches = (entryNIN === srcNIN);
+    } else if (entryNINPresent !== srcNINPresent) {
+        // One is present, the other is missing: this is a mismatch
+        ninMatches = false;
+    }
+    // If both are missing (else case), ninMatches remains true, meaning no mismatch caused by absence.
+    
+    // --- END UPDATED LOGIC ---
+
+
     const nameSimilarity = token_set_ratio(entryName, srcName);
     const nameMatches = nameSimilarity >= SIMILARITY_THRESHOLD;
 
+    // Final determination of 'Valid' or 'Partial Match'
     if (ssidMatches && ninMatches && nameMatches) {
       return { status: 'Valid', reason: `Verified (${nameSimilarity}% name match)`, matchedName: srcName, matchedSSID: srcSSID, matchedNIN: srcNIN, similarity: nameSimilarity };
     }
 
+    // If not 'Valid', it's a 'Partial Match'. Collect reasons.
     const mismatches: string[] = [];
     if (!ssidMatches) mismatches.push(`SSID mismatch`);
     if (!ninMatches) mismatches.push(`NIN mismatch`);
@@ -136,8 +176,10 @@ function getMatchStatus(entry: Entry, sourceBySSID: Map<string, Entry>, sourceBy
   }
 }
 
-// ** MODIFIED AND CORRECTED **
-// This is the robust version that correctly filters out empty rows.
+/**
+ * Parses an Excel/CSV file from a URL into an array of data Entry objects, 
+ * with robust header detection and empty row filtering.
+ */
 async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: string[] }> {
     try {
         const response = await fetch(url);
@@ -146,8 +188,8 @@ async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: 
         }
         const data = await response.arrayBuffer();
         const workbook = XLSX.read(data);
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
+        const sheetName: string = workbook.SheetNames[0]; // Get the name of the first sheet.
+        const sheet: XLSX.WorkSheet = workbook.Sheets[sheetName]; // Access the sheet using its name.
 
         const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
         if (rowsAsArrays.length === 0) {
@@ -162,15 +204,13 @@ async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: 
             .map(rowArray => {
                 const entry: Entry = {};
                 headerArray.forEach((header, index) => {
-                    // Only map values that have a corresponding header
                     if (header) { 
                         entry[header] = rowArray[index];
                     }
                 });
                 return entry;
             })
-            // **THE CRITICAL FIX**: Filter the array of *objects* afterwards.
-            // A row is only considered valid if at least one of its mapped values is not null, undefined, or an empty/whitespace string.
+            // Filter out rows that are entirely empty after mapping.
             .filter(obj => 
                 Object.values(obj).some(value => value !== null && value !== undefined && String(value).trim() !== '')
             );
@@ -182,18 +222,26 @@ async function parseFileFromUrl(url: string): Promise<{ data: Entry[], headers: 
     }
 }
 
+/**
+ * Identifies the most probable header row in a spreadsheet.
+ */
 function findBestHeaderRowIndex(rows: any[][]): number {
     let headerRowIndex = 0;
     let maxKeywords = 0;
     const headerKeywords = ['ssid', 'nin', 'name', 'id', 'pension', 'account', 'bank', 'verification', 'no', 's/n'];
+
     for (let i = 0; i < Math.min(10, rows.length); i++) {
         const row = rows[i];
         if (!Array.isArray(row) || row.length === 0) continue;
+
         const stringCellCount = row.filter(cell => typeof cell === 'string').length;
         const totalCellCount = row.filter(cell => cell != null && cell !== '').length;
+
         if (totalCellCount < 2 || (stringCellCount / totalCellCount < 0.5)) continue;
+
         const rowStr = row.join(' ').toLowerCase();
         const keywordMatches = headerKeywords.filter(k => rowStr.includes(k)).length;
+
         if (keywordMatches > maxKeywords) {
             maxKeywords = keywordMatches;
             headerRowIndex = i;
@@ -202,25 +250,28 @@ function findBestHeaderRowIndex(rows: any[][]): number {
     return headerRowIndex;
 }
 
-// --- MAIN POST HANDLER (unchanged) ---
+// --- MAIN POST HANDLER ---
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json();
-    const { sourceUrl, toValidateUrl } = body;
+    const { toValidateUrl } = body; 
 
-    if (!sourceUrl || !toValidateUrl || typeof sourceUrl !== 'string' || typeof toValidateUrl !== 'string') {
-      return NextResponse.json({ error: 'Request body must include sourceUrl and toValidateUrl strings.' }, { status: 400 });
+    if (!toValidateUrl || typeof toValidateUrl !== 'string') {
+      return NextResponse.json({ error: 'Request body must include toValidateUrl string.' }, { status: 400 });
     }
     
-    const [{ data: source, headers: sourceHeaders }, { data: entries, headers: entriesHeaders }] = await Promise.all([
-      parseFileFromUrl(sourceUrl),
-      parseFileFromUrl(toValidateUrl),
-    ]);
+    // Fetch the default source data, leveraging caching.
+    const sourceMap = await getDataSource(null); 
+    const source = Array.from(sourceMap.values());
 
-    if (source.length > MAX_SOURCE_LIMIT) throw new Error(`Source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
+    // Parse the user's validation file.
+    const { data: entries, headers: entriesHeaders } = await parseFileFromUrl(toValidateUrl);
+
+    // Enforce file size limits.
+    if (source.length > MAX_SOURCE_LIMIT) throw new Error(`Default source file exceeds limit of ${MAX_SOURCE_LIMIT} records.`);
     if (entries.length > MAX_ENTRIES_LIMIT) throw new Error(`Validation file exceeds limit of ${MAX_ENTRIES_LIMIT} records.`);
 
-    // The rest of the logic proceeds with correctly parsed data.
+    // Prepare lookup maps and track duplicates in the source.
     const sourceBySSID = new Map<string, Entry>();
     const sourceByNIN = new Map<string, Entry>();
     const seenInSource = new Set<string>();
@@ -230,17 +281,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const ssid = extractField(srcRecord, ['SSID', 'ssid', 'Ssid', 'SocialSecurity', 'SSN']);
       if (ssid) {
         if (seenInSource.has(ssid)) {
-          const entryName = extractFullName(srcRecord);
-          sourceWarnings.push(`Warning: Duplicate SSID '${ssid}' in source file for entry '${entryName || 'N/A'}'. This record was ignored.`);
+          sourceWarnings.push(`Warning: Duplicate SSID '${ssid}' in source file for entry '${extractFullName(srcRecord) || 'N/A'}'. This record was ignored.`);
         } else {
           seenInSource.add(ssid);
           sourceBySSID.set(ssid, srcRecord);
         }
       }
       const nin = extractField(srcRecord, ['NIN', 'nin', 'Nin', 'NationalID']);
-      if (nin) sourceByNIN.set(nin, srcRecord);
+      if (nin) {
+        if (!sourceByNIN.has(nin)) {
+            sourceByNIN.set(nin, srcRecord);
+        }
+      }
     }
 
+    // Process each entry in the validation file and check for duplicates within it.
     const results: ProcessedEntry[] = [];
     const seenInValidation = new Set<string>();
     
@@ -262,6 +317,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         seenInValidation.add(entrySSID);
       }
       
+      // Get the match status against the source data.
       const matchResult = getMatchStatus(entry, sourceBySSID, sourceByNIN);
       results.push({
         ...entry,
@@ -273,6 +329,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Prepare final headers and results summary.
     const finalHeaders = Array.from(new Set([...entriesHeaders, 'Match Status', 'Match Reason', 'Matched Name', 'Correct SSID', 'Correct NIN']));
     
     const summary = {
@@ -295,7 +352,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-// Other HTTP methods (unchanged)
+// --- Other HTTP Methods ---
+// Disallow GET, PUT, and DELETE for this endpoint.
 export async function GET() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
 export async function PUT() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
 export async function DELETE() { return NextResponse.json({ error: 'Method not allowed' }, { status: 405 }); }
