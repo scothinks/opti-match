@@ -5,7 +5,12 @@ import * as XLSX from 'xlsx';
 // --- Type Definitions & Constants ---
 type Entry = { [key: string]: any; };
 const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
-const DEFAULT_SOURCE_URL = 'https://qrh5x6rq2hazm8xn.public.blob.vercel-storage.com/25May2025_Optima-isGNe7J4aB874HzHPCmIZbCAOldMjM.csv';
+
+// IMPORTANT: Access the default source URL from environment variables.
+// This URL should be set in your .env.local file (for local development)
+// and in your deployment platform (e.g., Vercel environment variables).
+// Example in .env.local: NEXT_PUBLIC_DEFAULT_SOURCE_URL='https://your-blob-url.com/your-file.csv'
+const DEFAULT_SOURCE_URL = process.env.NEXT_PUBLIC_DEFAULT_SOURCE_URL;
 
 // --- Caching Logic ---
 const dataCache = new Map<string, { dataMap: Map<string, Entry>, timestamp: number }>();
@@ -64,8 +69,13 @@ function findBestHeaderRowIndex(rows: any[][]): number {
 
 // --- Core Data Function ---
 export async function getDataSource(url?: string | null): Promise<Map<string, Entry>> {
-    // **THE FIX IS HERE**: We now handle null or undefined URLs gracefully.
+    // Determine the URL to use: provided URL or the default from environment variables.
     const urlToUse = url || DEFAULT_SOURCE_URL;
+
+    // Ensure the default URL is actually set.
+    if (!urlToUse) {
+        throw new Error('Default source URL is not configured. Please set NEXT_PUBLIC_DEFAULT_SOURCE_URL environment variable.');
+    }
 
     const now = Date.now();
     // Use urlToUse for caching
@@ -79,7 +89,7 @@ export async function getDataSource(url?: string | null): Promise<Map<string, En
     console.log(`CACHE MISS: Fetching and parsing new data source: ${urlToUse}`);
     // Use urlToUse for fetching
     const response = await fetch(urlToUse);
-    if (!response.ok) throw new Error(`Failed to fetch data source: ${response.statusText}`);
+    if (!response.ok) throw new Error(`Failed to fetch data source from ${urlToUse}: ${response.statusText}`);
     
     const data = await response.arrayBuffer();
     const workbook = XLSX.read(data);
@@ -116,7 +126,8 @@ export async function getDataSource(url?: string | null): Promise<Map<string, En
 (async () => {
     try {
         console.log('CACHE WARMER: Initializing default data source...');
-        await getDataSource(); // Fetches the DEFAULT_SOURCE_URL
+        // Call getDataSource without a URL to trigger loading of the default source
+        await getDataSource(); 
     } catch (error) {
         console.error('CACHE WARMER FAILED:', error);
     }

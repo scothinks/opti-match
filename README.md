@@ -116,4 +116,3 @@ Visit [http://localhost:3000](http://localhost:3000) to explore the app.
 - 🔜 **Advanced Visualizations** – Use Chart.js for rich validation summaries  
 
 ---
-
