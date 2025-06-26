@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useRef, ChangeEvent, FormEvent, Ref } from 'react';
-import Link from 'next/link'; // **NEW**: Import Link for navigation
-import { upload } from '@vercel/blob/client';
-import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download, Home, RefreshCcw } from 'lucide-react'; // **NEW**: Import Home and RefreshCcw icons
+import Link from 'next/link'; 
+import { Search, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, UploadCloud, File as FileIcon, X, FileUp, List, Download, Home, RefreshCcw } from 'lucide-react'; 
 
 // --- Type Definitions ---
 type ResultItem = {
@@ -13,6 +12,13 @@ type ResultItem = {
   status: 'Match' | 'Mismatch' | 'Not Found' | 'Lookup Success';
 };
 type ActiveTab = 'single' | 'batch';
+
+// Define the expected response structure from the external upload API
+interface ExternalUploadApiResponse {
+  responseCode: number;
+  responseMessage: string;
+  data: string; // The URL is directly under 'data' key
+}
 
 // --- Main Page Component ---
 export default function LookupPage() {
@@ -43,22 +49,26 @@ export default function LookupPage() {
 
   // --- Logic ---
   const handleSourceFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    console.log('[DEBUG-LP] Source file selected:', e.target.files?.[0]?.name);
     const file = e.target.files?.[0];
     if (file) { setSourceFile(file); setCustomSourceUrl(null); }
   };
   const clearSourceFile = () => {
+    console.log('[DEBUG-LP] Clearing source file.');
     setSourceFile(null); setCustomSourceUrl(null);
     if(sourceFileInputRef.current) sourceFileInputRef.current.value = "";
   };
   const handleBatchFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    console.log('[DEBUG-LP] Batch file selected:', e.target.files?.[0]?.name);
     setBatchFile(e.target.files?.[0] || null);
   };
   const clearBatchFile = () => {
+    console.log('[DEBUG-LP] Clearing batch file.');
     setBatchFile(null); if(batchFileInputRef.current) batchFileInputRef.current.value = "";
   };
   
-  // **NEW**: Function to reset the entire form and results state
   const handleReset = () => {
+    console.log('[DEBUG-LP] Resetting lookup form and results.');
     setResults([]);
     setError(null);
     setSourceUsed(null);
@@ -66,49 +76,129 @@ export default function LookupPage() {
     setSingleSsid('');
     setSingleName('');
     clearBatchFile();
-    // Optionally, you can also clear the custom source file
-    // clearSourceFile(); 
-    // setShowCustomSource(false);
+    clearSourceFile(); 
+    setShowCustomSource(false);
   };
 
   const performLookup = async (payload: object) => {
+    console.log('[DEBUG-LP] Calling /api/lookup with payload:', payload);
     const lookupResponse = await fetch('/api/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!lookupResponse.ok) { const errorData = await lookupResponse.json(); throw new Error(errorData.details || 'An error occurred during lookup.'); }
+    
+    if (!lookupResponse.ok) { 
+      console.error('[DEBUG-LP] /api/lookup request failed. Status:', lookupResponse.status);
+      const errorData = await lookupResponse.json(); 
+      console.error('[DEBUG-LP] /api/lookup error response:', errorData);
+      throw new Error(errorData.details || 'An error occurred during lookup.'); 
+    }
     const data = await lookupResponse.json();
-    setResults(data.results); setSourceRecordCount(data.sourceRecordCount); setSourceUsed(data.sourceUsed);
+    console.log('[DEBUG-LP] /api/lookup successful response:', data);
+    setResults(data.results); 
+    setSourceRecordCount(data.sourceRecordCount); 
+    setSourceUsed(data.sourceUsed);
+  };
+
+  /**
+   * Helper function to upload a file to the external API and return its URL.
+   */
+  const uploadFileToExternalApi = async (file: File, fileType: string): Promise<string> => {
+    console.log(`[DEBUG-LP] Starting upload of ${fileType} file: ${file.name}`);
+    const formData = new FormData();
+    formData.append('file', file); // API expects the file under the 'file' key
+
+    const uploadApiUrl = 'https://staging-api.optima.com.ng/api/v1/beneficiary-validation/upload';
+    console.log(`[DEBUG-LP] Sending ${fileType} file to external API: ${uploadApiUrl}`);
+
+    const response = await fetch(uploadApiUrl, {
+      method: 'POST',
+      body: formData,
+      // No Content-Type header needed for FormData; browser sets it automatically
+      // You might need to add Authorization headers here if your team's API requires them
+      // For example:
+      // headers: {
+      //   'Authorization': `Bearer YOUR_API_TOKEN_HERE`, 
+      // },
+    });
+
+    if (!response.ok) {
+      console.error(`[DEBUG-LP] External API upload failed for ${fileType} file. Status:`, response.status);
+      let errorDetails = `Failed to upload ${fileType} file to external API.`;
+      try {
+        const errorData = await response.json();
+        console.error(`[DEBUG-LP] External API error response for ${fileType} file (JSON):`, errorData);
+        errorDetails = errorData.responseMessage || errorData.message || errorData.error || errorDetails;
+      } catch (jsonError) {
+        errorDetails = await response.text();
+        console.error(`[DEBUG-LP] External API error response for ${fileType} file (Text):`, errorDetails);
+      }
+      throw new Error(errorDetails);
+    }
+
+    const result: ExternalUploadApiResponse = await response.json();
+    console.log(`[DEBUG-LP] External API successful response for ${fileType} file:`, result);
+
+    if (result.responseCode !== 200 || !result.data) {
+        console.error(`[DEBUG-LP] External API upload failed: Invalid response data for ${fileType} file. Code: ${result.responseCode}, Message: ${result.responseMessage}, Data: ${result.data}`);
+        throw new Error(`External API upload failed: ${result.responseMessage || 'No valid URL returned.'}`);
+    }
+    console.log(`[DEBUG-LP] External API returned URL for ${fileType} file: ${result.data}`);
+    return result.data; // The URL is directly under 'data'
   };
   
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault(); 
+    console.log('[DEBUG-LP] Form submission initiated.');
     handleReset(); // Clear previous results before starting
     setIsLoading(true);
-    let tempSourceUrl = customSourceUrl;
+    let tempSourceUrl: string | null = null; // Use null for initial state
+
     try {
-      if (sourceFile && !tempSourceUrl) {
-        setStatusText('Uploading source file...');
-        const newBlob = await upload(`${Date.now()}-${sourceFile.name}`, sourceFile, { access: 'public', handleUploadUrl: '/api/upload' });
-        tempSourceUrl = newBlob.url; setCustomSourceUrl(tempSourceUrl);
+      // 1. Handle Custom Source File Upload (if selected)
+      if (showCustomSource && sourceFile) {
+        setStatusText('Uploading custom source file...');
+        console.log('[DEBUG-LP] Custom source file detected. Calling uploadFileToExternalApi.');
+        tempSourceUrl = await uploadFileToExternalApi(sourceFile, 'custom source');
+        setCustomSourceUrl(tempSourceUrl); // Update custom source URL state
+        console.log('[DEBUG-LP] Custom source file uploaded. URL:', tempSourceUrl);
+      } else if (!showCustomSource) {
+        // If not using custom source, ensure tempSourceUrl is null for default behavior
+        tempSourceUrl = null;
+        console.log('[DEBUG-LP] No custom source file selected. Using default.');
       }
+
+      // 2. Perform Lookup based on active tab
       if (activeTab === 'single') {
+        console.log('[DEBUG-LP] Single lookup mode active.');
         if (!singleSsid.trim()) throw new Error('SSID field cannot be empty.');
         setStatusText('Checking single entry...');
         await performLookup({ lookups: [{ ssid: singleSsid, nameToVerify: singleName }], sourceUrl: tempSourceUrl });
       } else if (activeTab === 'batch') {
+        console.log('[DEBUG-LP] Batch lookup mode active.');
         if (!batchFile) throw new Error('Please select a batch file to upload.');
         setStatusText('Uploading batch file...');
-        const newBlob = await upload(`${Date.now()}-${batchFile.name}`, batchFile, { access: 'public', handleUploadUrl: '/api/upload' });
+        console.log('[DEBUG-LP] Batch file detected. Calling uploadFileToExternalApi.');
+        const batchFileUrl = await uploadFileToExternalApi(batchFile, 'batch'); // Upload batch file
+        console.log('[DEBUG-LP] Batch file uploaded. URL:', batchFileUrl);
         setStatusText('Processing batch file...');
-        await performLookup({ batchFileUrl: newBlob.url, sourceUrl: tempSourceUrl });
+        // Note: The /api/lookup backend needs to be updated to handle 'batchFileUrl'
+        // and fetch the file from that URL, parse it, and then perform lookups.
+        // As per our previous discussion, the /api/lookup route expects 'lookups' array.
+        // You might need an intermediate step or modify the /api/lookup further to handle the batch file URL.
+        // For now, I'll pass it as 'batchFileUrl' assuming your /api/lookup can process it.
+        await performLookup({ batchFileUrl: batchFileUrl, sourceUrl: tempSourceUrl });
       }
+      console.log('[DEBUG-LP] Lookup process completed successfully.');
     } catch (err) {
+      console.error('[DEBUG-LP] Error during form submission:', err);
       setError(err instanceof Error ? err.message : 'An unknown error occurred.');
     } finally {
       setIsLoading(false);
+      console.log('[DEBUG-LP] Form submission finished. isLoading set to false.');
     }
   };
   
   const handleDownload = () => {
     if (results.length === 0) return;
+    console.log('[DEBUG-LP] Initiating CSV download.');
     const headers = ['Status', 'SSID', 'Name Checked', 'Name in System'];
     const escapeCsvCell = (cell: string | number) => {
         const str = String(cell ?? '');
@@ -135,10 +225,10 @@ export default function LookupPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    console.log('[DEBUG-LP] CSV download initiated.');
   };
 
   // --- UI Rendering Components ---
-  // (renderStatusBadge and renderFileUploader remain unchanged)
   const renderStatusBadge = (status: ResultItem['status']) => {
     const styles = {
       Match: "bg-emerald-100 text-emerald-800",
@@ -176,7 +266,7 @@ export default function LookupPage() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
       <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        {/* **NEW**: Home navigation link */}
+        {/* Home navigation link */}
         <div className="mb-8 text-center">
             <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
                 <Home size={16} />
