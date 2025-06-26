@@ -6,13 +6,12 @@ import * as XLSX from 'xlsx';
 type Entry = { [key: string]: any; };
 const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 
-// IMPORTANT: Access the default source URL from environment variables.
-// This URL should be set in your .env.local file (for local development)
-// and in your deployment platform (e.g., Vercel environment variables).
-// Example in .env.local: NEXT_PUBLIC_DEFAULT_SOURCE_URL='https://your-blob-url.com/your-file.csv'
-const DEFAULT_SOURCE_URL = process.env.NEXT_PUBLIC_DEFAULT_SOURCE_URL;
+// IMPORTANT: This environment variable will now hold the API endpoint URL,
+// NOT the direct Blob storage URL.
+const DEFAULT_SOURCE_API_URL = process.env.NEXT_PUBLIC_DEFAULT_SOURCE_URL;
 
 // --- Caching Logic ---
+// Cache key will now be the API URL if using default, or the direct URL if provided.
 const dataCache = new Map<string, { dataMap: Map<string, Entry>, timestamp: number }>();
 
 // --- Helper Functions ---
@@ -35,7 +34,6 @@ function extractField(entry: Entry, possibleFieldNames: string[]): string {
     return '';
 }
 
-// Note: This function is now only needed here, not in the API route.
 export function extractFullName(entry: Entry): string {
   const singleFullName = extractField(entry, ['FULL NAME', 'Full Name', 'full name', 'name', 'Name', 'FULLNAME', 'FullName', 'fullname', 'Beneficiary Name']);
   if (singleFullName) return singleFullName;
@@ -68,30 +66,51 @@ function findBestHeaderRowIndex(rows: any[][]): number {
 }
 
 // --- Core Data Function ---
-export async function getDataSource(url?: string | null): Promise<Map<string, Entry>> {
-    // Determine the URL to use: provided URL or the default from environment variables.
-    const urlToUse = url || DEFAULT_SOURCE_URL;
+export async function getDataSource(providedUrl?: string | null): Promise<Map<string, Entry>> {
+    let urlToFetchContent: string;
+    let cacheKey: string;
 
-    // Ensure the default URL is actually set.
-    if (!urlToUse) {
-        throw new Error('Default source URL is not configured. Please set NEXT_PUBLIC_DEFAULT_SOURCE_URL environment variable.');
+    if (providedUrl) {
+        // If a direct file URL is provided (e.g., for custom source uploads in lookup)
+        urlToFetchContent = providedUrl;
+        cacheKey = providedUrl;
+    } else {
+        // If no URL is provided, fetch from the default API endpoint first
+        const apiEndpoint = DEFAULT_SOURCE_API_URL;
+
+        if (!apiEndpoint) {
+            throw new Error('Default source API URL is not configured. Please set NEXT_PUBLIC_DEFAULT_SOURCE_URL environment variable.');
+        }
+
+        cacheKey = apiEndpoint; // Cache by the API endpoint URL
+
+        const now = Date.now();
+        const cachedEntry = dataCache.get(cacheKey);
+
+        if (cachedEntry && (now - cachedEntry.timestamp < CACHE_DURATION_MS)) {
+            console.log(`CACHE HIT: Returning data for API endpoint ${cacheKey}.`);
+            return cachedEntry.dataMap;
+        }
+
+        console.log(`FETCHING API: ${apiEndpoint}`);
+        const apiResponse = await fetch(apiEndpoint);
+        if (!apiResponse.ok) {
+            throw new Error(`Failed to fetch default source info from API: ${apiResponse.statusText}`);
+        }
+
+        const apiData: { responseCode: number; responseMessage: string; data: { fileUrl: string; }; } = await apiResponse.json(); // Type definition adjusted for the API response structure
+
+        if (apiData.responseCode !== 200 || !apiData.data?.fileUrl) { // Check responseCode and existence of fileUrl
+            throw new Error(`API response error or missing file URL: ${apiData.responseMessage || 'Unknown API error'}`);
+        }
+        urlToFetchContent = apiData.data.fileUrl; // Extract the actual file URL from the API response
     }
 
-    const now = Date.now();
-    // Use urlToUse for caching
-    const cachedEntry = dataCache.get(urlToUse);
-
-    if (cachedEntry && (now - cachedEntry.timestamp < CACHE_DURATION_MS)) {
-        console.log(`CACHE HIT: Returning data for ${urlToUse}.`);
-        return cachedEntry.dataMap;
-    }
+    console.log(`FETCHING CONTENT: ${urlToFetchContent}`);
+    const contentResponse = await fetch(urlToFetchContent);
+    if (!contentResponse.ok) throw new Error(`Failed to fetch data source content from ${urlToFetchContent}: ${contentResponse.statusText}`);
     
-    console.log(`CACHE MISS: Fetching and parsing new data source: ${urlToUse}`);
-    // Use urlToUse for fetching
-    const response = await fetch(urlToUse);
-    if (!response.ok) throw new Error(`Failed to fetch data source from ${urlToUse}: ${response.statusText}`);
-    
-    const data = await response.arrayBuffer();
+    const data = await contentResponse.arrayBuffer();
     const workbook = XLSX.read(data);
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
@@ -115,18 +134,16 @@ export async function getDataSource(url?: string | null): Promise<Map<string, En
         if (ssid) dataMap.set(ssid, record);
     }
     
-    // Use urlToUse for setting the cache
-    dataCache.set(urlToUse, { dataMap, timestamp: now });
-    console.log(`CACHE POPULATED: Source ${urlToUse} parsed. ${dataMap.size} records loaded.`);
+    dataCache.set(cacheKey, { dataMap, timestamp: Date.now() }); // Cache using the determined cacheKey
+    console.log(`CACHE POPULATED: Source ${urlToFetchContent} parsed. ${dataMap.size} records loaded.`);
     return dataMap;
 }
 
 // --- CACHE WARMING LOGIC ---
-// This self-invoking async function runs ONLY when the module is first loaded.
 (async () => {
     try {
-        console.log('CACHE WARMER: Initializing default data source...');
-        // Call getDataSource without a URL to trigger loading of the default source
+        console.log('CACHE WARMER: Initializing default data source via API...');
+        // Call getDataSource without a URL to trigger loading of the default source via the API
         await getDataSource(); 
     } catch (error) {
         console.error('CACHE WARMER FAILED:', error);
