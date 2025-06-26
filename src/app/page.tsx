@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { upload } from '@vercel/blob/client';
+
 import Link from 'next/link';
 import {
   Upload,
@@ -41,7 +41,7 @@ interface ValidationStats {
   exact: number;
   partial: number;
   none: number;
-  accuracy: string; // Still needed for the main Match Distribution summary
+  accuracy: string; 
 }
 
 interface ApiResponse {
@@ -56,6 +56,13 @@ interface ApiResponse {
     duplicatesInValidationFile?: number;
     sourceFileWarnings?: string[];
   };
+}
+
+// Define the expected response structure from the external upload API
+interface ExternalUploadApiResponse {
+  responseCode: number;
+  responseMessage: string;
+  data: string; // The URL is directly under 'data' key
 }
 
 export default function Home() {
@@ -77,22 +84,19 @@ export default function Home() {
   const [processingTime, setProcessingTime] = useState(0);
   const uploaderWarning = "For best results, please ensure the header is the first row."; 
 
-  // Simplified steps to reflect the new, streamlined flow
   const steps = ['Upload File', 'Validate', 'Results'];
 
   useEffect(() => {
-    // Only proceed to preview if the validation file is uploaded
     if (toValidateFileUrl) {
       setShowPreview(true);
-      setCurrentStep(1); // 'Validate' step
+      setCurrentStep(1); 
     } else {
       setShowPreview(false);
-      setCurrentStep(0); // 'Upload File' step
+      setCurrentStep(0);
     }
   }, [toValidateFileUrl]);
 
   useEffect(() => {
-    // Move to the 'Results' step once results are available
     if (results.length > 0) {
       setCurrentStep(2); 
     }
@@ -102,7 +106,6 @@ export default function Home() {
     setToastMessage(message);
     setToastType(type);
     setShowToast(true);
-    // Corrected: Set showToast to false after 4000ms
     setTimeout(() => setShowToast(false), 4000); 
   };
 
@@ -125,7 +128,6 @@ export default function Home() {
   };
   
   const handleFileSelectAndUpload = async (file: File | null) => {
-    // Reset file and URL states when a new file is selected
     setToValidateFile(file);
     setToValidateFileUrl(null);
     
@@ -134,85 +136,105 @@ export default function Home() {
     setIsUploadingValidation(true);
     showNotification(`Uploading ${file.name}...`, 'info');
 
-    // Generate a unique file name for Vercel Blob storage
-    const uniqueFileName = `validation-${Date.now()}-${Math.random().toString(36).substring(7)}-${file.name}`;
-
     try {
-      // Upload the file to Vercel Blob storage
-      const newBlob = await upload(uniqueFileName, file, {
-        access: 'public', // Make the file publicly accessible
-        handleUploadUrl: '/api/upload', // API route to handle the upload
+      const formData = new FormData();
+      formData.append('file', file); // Append the File object under the key 'file'
+
+      // --- CRITICAL CHANGE: Upload directly to external API ---
+      const response = await fetch('https://staging-api.optima.com.ng/api/v1/beneficiary-validation/upload', {
+        method: 'POST',
+        body: formData, 
+        // No Content-Type header needed for FormData; browser sets it automatically
+        // Add Authorization headers here if your team's API requires them
+        // For example:
+        // headers: {
+        //   'Authorization': `Bearer YOUR_API_TOKEN_HERE`, 
+        // },
       });
 
-      setToValidateFileUrl(newBlob.url); // Store the URL of the uploaded file
+      if (!response.ok) {
+        let errorDetails = 'Upload failed on external API.';
+        try {
+          // Attempt to parse the error response from the external API
+          const errorData = await response.json();
+          errorDetails = errorData.responseMessage || errorData.message || errorData.error || errorDetails; 
+        } catch (jsonError) {
+          errorDetails = await response.text(); // Fallback to raw text if JSON parsing fails
+        }
+        throw new Error(errorDetails);
+      }
+
+      // Parse the successful response from the API
+      const result: ExternalUploadApiResponse = await response.json(); 
+      
+      // Extract the file URL from the 'data' key of the API response
+      // This URL will be used by our backend /api/validate route
+      const newFileUrl = result.data; 
+
+      setToValidateFileUrl(newFileUrl); 
       showNotification(`${file.name} uploaded successfully.`, 'success');
+
     } catch (error) {
       console.error('An error occurred during upload:', error);
       showNotification(`Failed to upload ${file.name}. Please try again.`, 'error');
-      setToValidateFile(null); // Clear the file state on upload failure
+      setToValidateFile(null); 
     } finally {
-      setIsUploadingValidation(false); // Reset uploading state
+      setIsUploadingValidation(false);
     }
   };
 
   const handleValidation = async () => {
-    // Prevent validation if no file has been uploaded
     if (!toValidateFileUrl) {
       showNotification('Please upload the validation file before proceeding.', 'error');
       return;
     }
     setIsLoading(true);
-    setCurrentStep(1); // Set current step to 'Validate' (processing)
+    setCurrentStep(1); 
     const startTime = Date.now();
     setStatus('Initializing validation process...');
     showNotification('Starting comprehensive validation...', 'info');
 
     try {
       setStatus('Processing data with our matching algorithms...');
-      // Call the backend /api/validate endpoint
+      // Call the backend /api/validate endpoint, passing the URL obtained from the external API
       const res = await fetch('/api/validate', {
         method: 'POST',
-        // Send only the URL of the validation file; source is fetched by the backend
         body: JSON.stringify({ toValidateUrl: toValidateFileUrl }), 
         headers: { 'Content-Type': 'application/json' },
       });
 
       if (!res.ok) {
-        // Handle API errors, parsing detailed error messages if available
         let errorDetails = 'Validation failed on server.';
         try {
           const errorData = await res.json();
           errorDetails = errorData.details || errorData.error || errorDetails;
         } catch (jsonError) {
-          errorDetails = await res.text(); // Fallback to raw text if JSON parsing fails
+          errorDetails = await res.text(); 
         }
         throw new Error(errorDetails);
       }
 
       const result: ApiResponse = await res.json();
       const endTime = Date.now();
-      const duration = ((endTime - startTime) / 1000).toFixed(1); // Calculate processing time
+      const duration = ((endTime - startTime) / 1000).toFixed(1); 
 
-      // Update state with validation results and statistics
       setResults(result.results);
       setDetectedHeaders(result.headers || []);
       setValidationStats(calculateStats(result.results));
       setProcessingTime(parseFloat(duration));
-      setStatus(''); // Clear status message
+      setStatus(''); 
     } catch (error) {
-      // Display error notification and reset step on failure
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       showNotification(`Validation failed: ${errorMessage}`, 'error');
       setStatus('');
-      setCurrentStep(0); // Go back to 'Upload File' step on error
+      setCurrentStep(0); 
       console.error('Validation error:', error);
     } finally {
-      setIsLoading(false); // Always reset loading state
+      setIsLoading(false); 
     }
   };
 
   const handleReset = () => {
-    // Reset all relevant state variables to return to initial upload state
     setResults([]);
     setToValidateFile(null);
     setToValidateFileUrl(null);
@@ -228,24 +250,21 @@ export default function Home() {
     const updatedResults = [...results];
     const recordToUpdate = updatedResults[indexToUpdate];
 
-    // Manually approve a match, updating its status and reason
     if (recordToUpdate) {
       recordToUpdate['Match Status'] = 'Valid';
       recordToUpdate['Match Reason'] = 'Manually Approved by User';
       
-      setResults(updatedResults); // Update results to trigger re-render
-      setValidationStats(calculateStats(updatedResults)); // Recalculate stats
+      setResults(updatedResults);
+      setValidationStats(calculateStats(updatedResults));
       showNotification('Match has been manually approved.', 'success');
     }
-  }, [results]); // Dependency array ensures memoization based on results state
+  }, [results]); 
 
   const handleEditFiles = () => {
-    // Allow user to go back to the upload step to change the file
     setShowPreview(false);
     setCurrentStep(0);
   };
 
-  // Determine if the validation button should be disabled
   const isValidationDisabled = isUploadingValidation || isLoading;
 
   return (
@@ -472,7 +491,6 @@ export default function Home() {
                         <Clock className="w-4 h-4" />
                         Processed in {processingTime}s
                       </span>
-                      {/* REMOVED: Accuracy display from top header */}
                       {/* <span className="flex items-center gap-1">
                         <TrendingUp className="w-4 h-4" />
                         {validationStats.accuracy}% accuracy
